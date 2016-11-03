@@ -26,15 +26,20 @@ port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
+typedef struct matrix3 {
+    uchar s_image[3][3];
+    uchar colour;
+} matrix3;
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], chanend c_out)
-{
+uchar DataInStream(char infname[], chanend c_out) {
   int res;
-  uchar line[ IMWD ];
+  uchar line[IMWD];
+  uchar image[IMWD][IMHT];
   printf( "DataInStream: Start...\n" );
 
   //Open PGM file
@@ -44,21 +49,64 @@ void DataInStream(char infname[], chanend c_out)
     return;
   }
 
-  //Read image line-by-line and send byte by byte to channel c_out
-  for( int y = 0; y < IMHT; y++ ) {
+  // sending image to distributor.
+  for (int y = 0; y < IMHT; y++) {
     _readinline( line, IMWD );
     for( int x = 0; x < IMWD; x++ ) {
-      c_out <: line[ x ];
+        c_out <: line[x];
+    }
+  }
+
+  /*
+  //Read image line-by-line and send byte by byte to channel c_out
+  for (int y = 0; y < IMHT; y++) {
+    _readinline( line, IMWD );
+    for( int x = 0; x < IMWD; x++ ) {
+      c_out <: line[x];
       printf( "-%4.1d ", line[ x ] ); //show image values
     }
     printf( "\n" );
   }
+  */
+
+  //
 
   //Close PGM image file
   _closeinpgm();
   printf( "DataInStream: Done...\n" );
   return;
 }
+
+void worker(chanend c_fromDist) {
+    matrix3 currentM;
+    c_fromDist :> currentM;
+    int count = 0;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            if (j == 1) j++;
+            if (currentM.s_image[i][j] == 255) count++;
+        }
+        if (i == 1) i++;
+    }
+    /* LOGIC FOR IF CELL WILL CHANGE.
+    • any live cell with fewer than two live neighbours dies
+    • any live cell with two or three live neighbours is unaffected
+    • any live cell with more than three live neighbours dies
+    • any dead cell with exactly three live neighbours becomes alive
+    */
+    if (currentM.s_image[1][1] == 255) {
+        if (count < 2 || count > 3) {
+            currentM.colour = 0;
+        }
+    }
+    else if (count == 3) {
+        currentM.colour = 255;
+    }
+
+    c_fromDist <: currentM;
+}
+
+
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -67,25 +115,47 @@ void DataInStream(char infname[], chanend c_out)
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc)
-{
+void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorker[n], unsigned n) {
   uchar val;
+  uchar image[IMWD][IMHT];
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
   printf( "Waiting for Board Tilt...\n" );
   fromAcc :> int value;
 
+  printf( "Populating image array...\n" );
+  for (int y = 0; y < IMHT; y++) {      // go through all lines
+      for( int x = 0; x < IMWD; x++ ) {  // go through each pixel per line
+          c_in :> image[x][y];                   // read the pixel value
+      }
+  }
+
+  uchar new_image[IMWD][IMHT];
+  memcpy(new_image, image, sizeof (uchar) * IMHT * IMWD);
+
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
+
   printf( "Processing...\n" );
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-    for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-      c_in :> val;                    //read the pixel value
-      c_out <: (uchar)( val ^ 0xFF ); //send some modified pixel out
+  for( int y = 0; y < IMHT; y++ ) {   // go through all lines
+    for( int x = 0; x < IMWD; x++ ) { // go through each pixel per line
+        matrix3 currentM;
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                currentM.s_image[i][j] = image[(x + i - 1 + IMWD) % IMWD][(y + j - 1 + IMHT) % IMHT];
+            }
+        }
+        c_toWorker[0] <: currentM;
+        c_toWorker[0] :> currentM;
+        new_image[x][y] = currentM.colour;
     }
   }
+
+  // Print and save image.
+  c_out <: new_image;
+
   printf( "\nOne processing round completed...\n" );
 }
 
@@ -172,18 +242,20 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
 
-i2c_master_if i2c[1];               //interface to orientation
+i2c_master_if i2c[1];             // interface to orientation
 
-char infname[] = "test.pgm";     //put your input image path here
-char outfname[] = "testout.pgm"; //put your output image path here
-chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
+char infname[] = "test.pgm";      // put your input image path here
+char outfname[] = "testout.pgm";  // put your output image path here
+chan c_inIO, c_outIO, c_control;  // extend your channel definitions here
+chan c_workers[1];
 
 par {
-    i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
-    orientation(i2c[0],c_control);        //client thread reading orientation data
-    DataInStream(infname, c_inIO);          //thread to read in a PGM image
-    DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
+    i2c_master(i2c, 1, p_scl, p_sda, 10);     // server thread providing orientation data
+    orientation(i2c[0],c_control);            // client thread reading orientation data
+    DataInStream(infname, c_inIO);            // thread to read in a PGM image
+    DataOutStream(outfname, c_outIO);         // thread to write out a PGM image
+    distributor(c_inIO, c_outIO, c_control, c_workers, 1);  // thread to coordinate work on image
+    worker(c_workers[0]);
   }
 
   return 0;
