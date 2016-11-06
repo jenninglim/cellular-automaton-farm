@@ -29,8 +29,11 @@ port p_sda = XS1_PORT_1F;
 // A 3x3 matrix.
 typedef struct matrix3 {
     uchar s_image[3][3];
+    int x;
+    int y;
     uchar colour;  // Colour of the centre cell.
 } matrix3;
+
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -54,7 +57,7 @@ uchar DataInStream(char infname[], chanend c_out) {
         _readinline(line, IMWD);
         for (int x = 0; x < IMWD; x++) {
             c_out <: line[x];
-            printf( "-%4.1d ", line[ x ] ); // Show image values.
+            printf( "-%4.1d ", line[x] ); // Show image values.
         }
         printf("\n");
     }
@@ -86,6 +89,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
             c_in :> image[x][y];           // Read the pixel value.
         }
     }
+    printf("\n");
 
     // Create a 3x3 matrix for each pixel (and its surrounding cells) and farm out
     // to the workers to analyse potential changes for the next round.
@@ -93,16 +97,29 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
     for(int y = 0; y < IMHT; y++) {        // Go through all lines.
         for( int x = 0; x < IMWD; x++ ) {  // Go through each pixel per line.
             matrix3 currentM;              // Create a 3x3 matrix.
-            for (int i = 0; i < 4; i++) {
-                for (int j = 0; j < 4; j++) {
+            currentM.x = x;
+            currentM.y = y;
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    //printf("x=%d, y=%d, i=%d, j=%d\n", x, y, i, j);
                     currentM.s_image[i][j] = image[(x + i - 1 + IMWD) % IMWD][(y + j - 1 + IMHT) % IMHT];
                 }
             }
+            currentM.colour = currentM.s_image[1][1];
+            printf("image[%d][%d]: %d\n", x, y, image[x][y]);
+            printf("currentM(%d,%d): %d\n", currentM.x, currentM.y, currentM.colour);
+            printf("here1: (%d,%d)\n", x, y);
             c_toWorker[0] <: currentM;     // Send to a worker to process.
+            printf("here2: (%d,%d)\n", x, y);
             c_toWorker[0] :> currentM;     // Receive back the processed matrix.
+            printf("here3: (%d,%d)\n", x, y);
             c_out <: currentM.colour;      // Print and save the pixel.
+            printf( "-%4.1d ", currentM.colour); // Show image values.
+            printf("here4: (%d,%d)\n", x, y);
         }
+        printf("\n");
     }
+    printf("\n");
 
     printf( "\nOne processing round completed...\n" );
 }
@@ -116,14 +133,15 @@ void worker(chanend c_fromDist) {
     matrix3 currentM;
     c_fromDist :> currentM;
     int count = 0;
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
             if (j == 1) j++;
             if (currentM.s_image[i][j] == 255) count++;
         }
         if (i == 1) i++;
     }
 
+    printf("Cell (%d,%d) before: %d\n",currentM.x, currentM.y, currentM.colour);
     /* LOGIC FOR IF CELL WILL CHANGE:
     • any live cell with fewer than two live neighbours dies.
     • any live cell with two or three live neighbours is unaffected.
@@ -131,7 +149,7 @@ void worker(chanend c_fromDist) {
     • any dead cell with exactly three live neighbours becomes alive.
     */
     // If alive
-    if (currentM.s_image[1][1] == 255) {
+    if (currentM.colour == 255) {
         if (count < 2 || count > 3) {
             currentM.colour = 0;  // Now dead.
         }
@@ -140,8 +158,9 @@ void worker(chanend c_fromDist) {
     else if (count == 3) {
         currentM.colour = 255;    // Now alive.
     }
+    printf("Cell (%d,%d) after: %d\n",currentM.x, currentM.y, currentM.colour);
 
-    c_fromDist <: currentM;
+    //c_fromDist <: currentM;
 }
 
 
