@@ -55,16 +55,17 @@ uchar DataInStream(char infname[], chanend c_out) {
     // Read image line-by-line and send byte by byte to channel c_out.
     for (int y = 0; y < IMHT; y++) {
         _readinline(line, IMWD);
+        if (y != 0) printf("[%2.1d]", y);
         for (int x = 0; x < IMWD; x++) {
             c_out <: line[x];
-            printf( "-%4.1d ", line[x] ); // Show image values.
+            printf("-%4.1d ", line[x]); // Show image values.
         }
         printf("\n");
     }
 
     // Close PGM image file.
     _closeinpgm();
-    printf( "DataInStream: Done...\n" );
+    printf("DataInStream: Done...\n");
     return 0;
 }
 
@@ -84,6 +85,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
 
     // Construct the image pixel by pixel.
     printf( "Populating image array...\n" );
+    printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n[ 0]");
     for (int y = 0; y < IMHT; y++) {       // Go through all lines.
         for( int x = 0; x < IMWD; x++ ) {  // Go through each pixel per line.
             c_in :> image[x][y];           // Read the pixel value.
@@ -93,35 +95,29 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
 
     // Create a 3x3 matrix for each pixel (and its surrounding cells) and farm out
     // to the workers to analyse potential changes for the next round.
-    printf( "Processing...\n" );
+    printf("Processing...\n");
+    printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
     for(int y = 0; y < IMHT; y++) {        // Go through all lines.
+        printf("[%2.1d]", y);
         for( int x = 0; x < IMWD; x++ ) {  // Go through each pixel per line.
             matrix3 currentM;              // Create a 3x3 matrix.
             currentM.x = x;
             currentM.y = y;
-            for (int i = 0; i < 3; i++) {
-                for (int j = 0; j < 3; j++) {
-                    //printf("x=%d, y=%d, i=%d, j=%d\n", x, y, i, j);
+            for (int j = 0; j < 3; j++) {
+                for (int i = 0; i < 3; i++) {
                     currentM.s_image[i][j] = image[(x + i - 1 + IMWD) % IMWD][(y + j - 1 + IMHT) % IMHT];
                 }
             }
             currentM.colour = currentM.s_image[1][1];
-            printf("image[%d][%d]: %d\n", x, y, image[x][y]);
-            printf("currentM(%d,%d): %d\n", currentM.x, currentM.y, currentM.colour);
-            printf("here1: (%d,%d)\n", x, y);
             c_toWorker[0] <: currentM;     // Send to a worker to process.
-            printf("here2: (%d,%d)\n", x, y);
             c_toWorker[0] :> currentM;     // Receive back the processed matrix.
-            printf("here3: (%d,%d)\n", x, y);
             c_out <: currentM.colour;      // Print and save the pixel.
             printf( "-%4.1d ", currentM.colour); // Show image values.
-            printf("here4: (%d,%d)\n", x, y);
         }
         printf("\n");
     }
-    printf("\n");
 
-    printf( "\nOne processing round completed...\n" );
+    printf( "One processing round completed...\n" );
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -130,37 +126,44 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend c_fromDist) {
-    matrix3 currentM;
-    c_fromDist :> currentM;
-    int count = 0;
-    for (int i = 0; i < 3; i++) {
+    while (1) {
+        matrix3 currentM;
+
+        c_fromDist :> currentM;
+        //printf("\nCell(%d,%d)\n%u, %u, %u\n%u, %u, %u\n%u, %u, %u\n\n",currentM.x, currentM.y, \
+                currentM.s_image[0][0], currentM.s_image[1][0], currentM.s_image[2][0], \
+                currentM.s_image[0][1], currentM.s_image[1][1], currentM.s_image[2][1], \
+                currentM.s_image[0][2], currentM.s_image[1][2], currentM.s_image[2][2]);
+
+        int count = 0;
         for (int j = 0; j < 3; j++) {
-            if (j == 1) j++;
-            if (currentM.s_image[i][j] == 255) count++;
+            for (int i = 0; i < 3; i++) {
+                if (i == 1 && j == 1) {
+                    i++;
+                }
+                if (currentM.s_image[i][j] == 255) count++;
+            }
         }
-        if (i == 1) i++;
-    }
 
-    printf("Cell (%d,%d) before: %d\n",currentM.x, currentM.y, currentM.colour);
-    /* LOGIC FOR IF CELL WILL CHANGE:
-    • any live cell with fewer than two live neighbours dies.
-    • any live cell with two or three live neighbours is unaffected.
-    • any live cell with more than three live neighbours dies.
-    • any dead cell with exactly three live neighbours becomes alive.
-    */
-    // If alive
-    if (currentM.colour == 255) {
-        if (count < 2 || count > 3) {
-            currentM.colour = 0;  // Now dead.
+        /* LOGIC FOR IF CELL WILL CHANGE:
+        • any live cell with fewer than two live neighbours dies.
+        • any live cell with two or three live neighbours is unaffected.
+        • any live cell with more than three live neighbours dies.
+        • any dead cell with exactly three live neighbours becomes alive.
+        */
+        // If alive
+        if (currentM.colour == 255) {
+            if (count < 2 || count > 3) {
+                currentM.colour = 0;  // Now dead.
+            }
         }
-    }
-    // If dead
-    else if (count == 3) {
-        currentM.colour = 255;    // Now alive.
-    }
-    printf("Cell (%d,%d) after: %d\n",currentM.x, currentM.y, currentM.colour);
+        // If dead
+        else if (count == 3) {
+            currentM.colour = 255;    // Now alive.
+        }
 
-    //c_fromDist <: currentM;
+        c_fromDist <: currentM;
+    }
 }
 
 
@@ -174,7 +177,7 @@ void DataOutStream(char outfname[], chanend c_in) {
     uchar line[IMWD];
 
     //Open PGM file.
-    printf( "DataOutStream: Start...\n" );
+    printf("DataOutStream: Start...\n" );
     res = _openoutpgm( outfname, IMWD, IMHT );
     if(res) {
         printf( "DataOutStream: Error opening %s\n.", outfname );
@@ -187,12 +190,12 @@ void DataOutStream(char outfname[], chanend c_in) {
             c_in :> line[x];
         }
         _writeoutline(line, IMWD);
-        printf( "DataOutStream: Line written...\n" );
+        //printf( "DataOutStream: Line written...\n" );
     }
 
     // Close the PGM image.
     _closeoutpgm();
-    printf( "DataOutStream: Done...\n" );
+    printf("\nDataOutStream: Done...\n");
     return;
 }
 
