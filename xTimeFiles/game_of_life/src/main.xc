@@ -68,8 +68,6 @@ uchar DataInStream(char infname[], chanend c_out) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorker[n], unsigned n) {
-    uchar image[IMWD][IMHT];     // The full image at the start of a round.
-    uchar newImage[IMWD][IMHT];  // The image after processing a round.
     uchar pixel;                 // A single pixel being read in.
 
     // Start up and wait for tilting of the xCore-200 Explorer.
@@ -94,46 +92,53 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
     printf("\n");
 
     // Populate newImage with the updated values.
+    uchar newImage[IMWD][IMHT];  // The image after processing a round.
     int x0 = 0;
     int y0 = 0;
     int x1 = IMWD/2;
-    int y1 = IMHT/2;
-    bool filled = false;
-    while (!filled) {
+    int y1 = 0;
+    //int filled = 0;
+    while (x0 < IMWD/2 && y0 < IMHT && x1 < IMWD && y1 < IMHT) {
+        //printf("Starting newImage?\n");
         select {
-            case toWorker[0] :> pixel:
-            newImage[x0][y0] = pixel;
-            x0++;
-            if (x0 = IMWD/2) {
-                x0 = 0;
-                y0++;
-            }
-            break;
+            case c_toWorker[0] :> pixel:
+                //if (y0==15) {
+                    //printf("from 0: (%d,%d) = %d\n", x0, y0, pixel);
+                //}
+                newImage[x0][y0] = pixel;
+                x0++;
+                if (x0 == IMWD/2) {
+                    x0 = 0;
+                    y0++;
+                }
+                break;
+            case c_toWorker[1] :> pixel:
+                //if (y1 == 15) {
+                //    printf("from 1: (%d,%d) = %d\n", x1, y1, pixel);
+                //}
+                newImage[x1][y1] = pixel;
+                x1++;
+                if (x1 == IMWD) {
+                    x1 = IMWD/2;
+                    y1++;
+                }
+                break;
         }
-        select {
-            case toWorker[1] :> pixel:
-            newImage[x1][y1] = pixel;
-            x1++;
-            if (x1 = IMWD) {
-                x1 = IMWD/2;
-                y1++;
-            }
-            break;
-        }
-        if (x0 == IMWD/2 && y0 == IMHT && x1 == IMWD && y1 == IMHT) {
-            filled = true;
-        }
+        //if (x0 == IMWD/2 && y0 == IMHT && x1 == IMWD && y1 == IMHT) {
+        //    filled = 1;
+        //}
     }
 
     // Print and save the pixel.
     printf("Processing...\n");
     printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
-    for (y = 0; y < IMHT; y++) {
+    for (int y = 0; y < IMHT; y++) {
         printf("[%2.1d]", y);
-        for (x = 0; x < IMWD; x++) {
+        for (int x = 0; x < IMWD; x++) {
             c_out <: newImage[x][y];
             printf( "-%4.1d ", newImage[x][y]);
         }
+        printf("\n");
     }
     printf("\n");
 
@@ -145,17 +150,17 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
 // Worker that processes part of the image.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void worker(chanend c_fromDist) {
+void worker(chanend c_fromDist, int n) {
     uchar image[IMWD/2][IMHT];
-
+    //printf("Worker %d populating...\n", n);
     // Reading in the worker's part of the image.
     for (int y = 0; y < IMHT; y++) {       // Go through all lines.
         for( int x = 0; x < (IMWD/2); x++ ) {  // Go through each pixel per line.
             c_fromDist :> image[x][y];           // Read the pixel value.
         }
     }
-
-    while (1) {
+    //printf("Worker %d finished populating...\n", n);
+    //while (1) {
         // to the workers to analyse potential changes for the next round.
         for (int y = 0; y < IMHT; y++) {        // Go through all lines.
             for (int x = 0; x < (IMWD/2); x++) {  // Go through each pixel per line.
@@ -165,7 +170,7 @@ void worker(chanend c_fromDist) {
                         if (i == 1 && j == 1) {
                             i++;
                         }
-                        if (image[(x + i - 1 + (IMWD/2)) % (IMWD/2)][(y + j - 1 + IMHT) % IMHT] = 255) {
+                        if (image[(x + i - 1 + (IMWD/2)) % (IMWD/2)][(y + j - 1 + IMHT) % IMHT] == 255) {
                             count++;
                         }
                     }
@@ -176,19 +181,31 @@ void worker(chanend c_fromDist) {
                 • any live cell with more than three live neighbours dies.
                 • any dead cell with exactly three live neighbours becomes alive.
                 */
+                uchar zero = 0;
+                uchar twofivefive = 255;
                 // If alive
-                if (currentM.colour == 255) {
+                if (image[x][y] == 255) {
                     if (count < 2 || count > 3) {
-                        c_fromDist <: 0;  // Now dead.
+                        //if (!n) printf("Wk%d - here1: (%d,%d)\n", n, x, y);
+                        c_fromDist <: zero;  // Now dead.
+                    }
+                    else {
+                        //if (!n) printf("Wk%d - here1a: (%d,%d)\n", n, x, y);
+                        c_fromDist <: image[x][y];
                     }
                 }
                 // If dead
                 else if (count == 3) {
-                    c_fromDist <: 255;    // Now alive.
+                    //if (!n) printf("Wk%d - here2: (%d,%d)\n", n, x, y);
+                    c_fromDist <: twofivefive;    // Now alive.
+                }
+                else {
+                    //if (!n) printf("Wk%d - here2a: (%d,%d)\n", n, x, y);
+                    c_fromDist <: image[x][y];
                 }
             }
         }
-    }
+    //}
 
 }
 
@@ -276,21 +293,21 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 int main(void) {
 
     i2c_master_if i2c[1];             // interface to orientation
-    int n = 2;                        // The number of workers.
+    //int n = 2;                        // The number of workers.
 
     char infname[] = "test.pgm";      // put your input image path here
     char outfname[] = "testout.pgm";  // put your output image path here
     chan c_inIO, c_outIO, c_control;  // extend your channel definitions here
-    chan c_workers[n];                // worker channels (one for each worker).
+    chan c_workers[2];                // worker channels (one for each worker).
 
     par {
         i2c_master(i2c, 1, p_scl, p_sda, 10);  // server thread providing orientation data.
         orientation(i2c[0],c_control);         // client thread reading orientation data.
         DataInStream(infname, c_inIO);         // thread to read in a PGM image.
         DataOutStream(outfname, c_outIO);      // thread to write out a PGM image.
-        distributor(c_inIO, c_outIO, c_control, c_workers, n);  // thread to coordinate work on image.
-        worker(c_workers[0]);                  // thread to do work on an image.
-        worker(c_workers[1]);                  // thread to do work on an image.
+        distributor(c_inIO, c_outIO, c_control, c_workers, 2);  // thread to coordinate work on image.
+        worker(c_workers[0], 0);                  // thread to do work on an image.
+        worker(c_workers[1], 1);                  // thread to do work on an image.
     }
 
   return 0;
