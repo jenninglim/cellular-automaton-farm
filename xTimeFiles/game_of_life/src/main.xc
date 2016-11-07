@@ -75,12 +75,12 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
     printf( "Waiting for Board Tilt...\n" );
     fromAcc :> int value;
 
-    // Construct the image pixel by pixel.
+    // Send the image pixel by pixel to the workers.
     printf( "Populating image arrays...\n" );
     printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n[ 0]");
-    for (int y = 0; y < IMHT; y++) {       // Go through all lines.
-        for( int x = 0; x < IMWD; x++ ) {  // Go through each pixel per line.
-            c_in :> pixel;           // Read the pixel value.
+    for (int y = 0; y < IMHT; y++) {
+        for( int x = 0; x < IMWD; x++ ) {
+            c_in :> pixel;
             if (x < (IMWD / 2)) {
                 c_toWorker[0] <: pixel;
             }
@@ -97,14 +97,11 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
     int y0 = 0;
     int x1 = IMWD/2;
     int y1 = 0;
-    //int filled = 0;
-    while (x0 < IMWD/2 && y0 < IMHT && x1 < IMWD && y1 < IMHT) {
+    while (y0 < IMHT || y1 < IMHT) {
         //printf("Starting newImage?\n");
         select {
             case c_toWorker[0] :> pixel:
-                //if (y0==15) {
-                    //printf("from 0: (%d,%d) = %d\n", x0, y0, pixel);
-                //}
+                //printf("from 0: (%d,%d) = %d\n", x0, y0, pixel);
                 newImage[x0][y0] = pixel;
                 x0++;
                 if (x0 == IMWD/2) {
@@ -113,9 +110,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
                 }
                 break;
             case c_toWorker[1] :> pixel:
-                //if (y1 == 15) {
-                //    printf("from 1: (%d,%d) = %d\n", x1, y1, pixel);
-                //}
+                printf("from 1: (%d,%d) = %d\n", x1, y1, pixel);
                 newImage[x1][y1] = pixel;
                 x1++;
                 if (x1 == IMWD) {
@@ -124,10 +119,8 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
                 }
                 break;
         }
-        //if (x0 == IMWD/2 && y0 == IMHT && x1 == IMWD && y1 == IMHT) {
-        //    filled = 1;
-        //}
     }
+    //printf("x0:%d, y0:%d, x1:%d, y1:%d\n", x0, y0, x1, y1);
 
     // Print and save the pixel.
     printf("Processing...\n");
