@@ -12,9 +12,10 @@
 ### TODO
 
 1. Query warnings.
-2. Do pointers work the same in XC?
-3. Make uchar implementation work with Geometric Parallelism.
-4. Make uchar implementation work with Farming.
+
+### Finished TODO
+* Make uchar implementation work with Geometric Parallelism.
+* Make uchar implementation work with Farming.
 
 ### Extension
 
