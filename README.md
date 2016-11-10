@@ -11,5 +11,6 @@ Extension
 1. Split the bytes into bits.
 2. extend to include arbitrary size images (i.e. not just dimensions that are powers of 2).
 3. implement function that returns an element in x and y position in a 32 bit character array.
+4. Identify the sparse parts of the map and disregard using bit manipulation (after we have finished bytes to bits).
 
 
