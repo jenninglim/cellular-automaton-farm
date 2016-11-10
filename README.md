@@ -12,3 +12,5 @@ Distributors keeps track of this. (When the size of the image is not divisible b
 
 ## Extension
 * Compress uint32 by reducing 0s. (Requires thorough formalisations).
+ 
+ Distributor must keep track of the index in the int and the length of the compressed bits
