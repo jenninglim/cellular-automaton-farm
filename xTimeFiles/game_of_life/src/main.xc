@@ -3,12 +3,15 @@
 
 #include <platform.h>
 #include <xs1.h>
+#include <math.h>
 #include <stdio.h>
 #include "pgmIO.h"
 #include "i2c.h"
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
+#define NumberOfWorkers 1         //number of workers
+#define uintArrayWidth 1             //ceil(IMWD - 1 / 31) + 1
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -26,6 +29,65 @@ port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
+//Returns a bit in a unint32_t integer
+uchar returnBitInt(uint32_t queriedInt, uchar index) {
+    if ( (queriedInt & 0x00000001 << (31 - index)) == 0 ) {
+        return 0;
+    }
+    else {
+        return 255;
+    }
+}
+
+//for debug
+void printBinary(uint32_t queriedInt) {
+    for (int i = 0; i < 32; i ++) {
+        if ( (queriedInt & 0x00000001 << (31 - i)) == 0 ) {
+            printf("0 ");
+        }
+        else {
+            printf("1 ");
+        }
+    }
+    printf("\n");
+}
+
+/* Compresses the array of char.
+ * Input: array of uchar of length 32
+ * Output: Uint32 isomorphic to the array
+ */
+uint32_t bytesToBits(uchar line[], uchar length) {
+    uint32_t output = 0;
+    for (int i = 0; i < length; i ++) {
+        if (line[i] == 255) {
+            output = output | 0x00000001 << (31 - i);
+        }
+    }
+    return output;
+}
+
+/* ad hoc concatentation to uint32
+ * Input:
+ *      head: addeds to the start of the array
+ *      array: array to be modified
+ *      length: <= 30
+ *      tail: number of elememts to be copied
+ */
+uint32_t formRow(uchar head, uchar array[], uchar length, uchar tail) {
+    uchar temp[32];
+    temp[0] = head;
+    for (int i = 0 ; i < length + 1; i ++) {
+        if (i != length) {
+            temp[i+ 1] = array[i];
+        }
+        else {
+            temp[i + 1] = tail;
+        }
+    }
+    return bytesToBits(temp, length + 2);
+}
+
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Read Image from PGM file from path infname[] to channel c_out
@@ -34,7 +96,11 @@ port p_sda = XS1_PORT_1F;
 void DataInStream(char infname[], chanend c_out)
 {
   int res;
-  uchar line[ IMWD ];
+  uchar head[1];
+  uchar tail[1];
+  uchar line[32];
+  uint32_t linePart = 0;
+  uchar length = 0;
   printf( "DataInStream: Start...\n" );
 
   //Open PGM file
@@ -45,13 +111,17 @@ void DataInStream(char infname[], chanend c_out)
   }
 
   //Read image line-by-line and send byte by byte to channel c_out
-  for( int y = 0; y < IMHT; y++ ) {
-    _readinline( line, IMWD );
-    for( int x = 0; x < IMWD; x++ ) {
-      c_out <: line[ x ];
-      printf( "-%4.1d ", line[ x ] ); //show image values
-    }
-    printf( "\n" );
+  for( int y = 0; y < IMHT; y++ ) { //goes through  the height of the read line.
+      for (int i = 0; i < uintArrayWidth; i++ ) {
+          if (i == ceil(IMWD / 30)) {
+              length = IMWD % 30 - 2;
+          }
+          _readinline( line, length);
+          _readinline(tail, 1);
+          linePart = formRow(head[0] ,line,length, tail[0]);
+          c_out <: linePart;
+          head[0] = tail[0];
+      }
   }
 
   //Close PGM image file
@@ -67,9 +137,14 @@ void DataInStream(char infname[], chanend c_out)
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc)
+void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWorker[n], unsigned n)
 {
-  uchar val;
+  uint32_t linePart[uintArrayWidth][IMHT];
+  uchar safe = 0;
+  uchar i = 0; //index for the width of input array
+  uchar j = 0; //index for height of input array
+  uchar k = 0;
+  uchar processing = 1;
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -79,14 +154,94 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
-  printf( "Processing...\n" );
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-    for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-      c_in :> val;                    //read the pixel value
-      c_out <: (uchar)( val ^ 0xFF ); //send some modified pixel out
-    }
+  while (processing) {
+      if (i == uintArrayWidth - 1 && j == IMHT - 1 && k == IMHT) { processing = 0; }
+      select {
+        case c_in :> linePart[i % uintArrayWidth][j]:
+            if (j == 2) {
+                for (int x = 0; x < 3 ; x++) {
+                    c_toWorker[0] <: linePart[i % uintArrayWidth][j - x + IMHT % IMHT];
+                }
+            } else if (k + 3 <= j) {
+                safe = 1;
+            }
+            i++;
+            if (i % uintArrayWidth == 0) {
+                j++;
+            }
+            break;
+        case safe => c_toWorker[0] :> uint32_t output:
+            for (int x = 0; x < 3 ; x++) {
+                c_toWorker[0] <: linePart[0][(k +  - x + 1 + IMHT) % IMHT];
+            }
+            k ++;
+            if (k + 3 > j) {
+                safe = 0;
+            }
+            break;
+      }
   }
+
   printf( "\nOne processing round completed...\n" );
+}
+
+uchar deadOrAlive(uchar state, uchar count) {
+    if (state == 255) {
+        if (count < 2 || count > 3) {
+            return 0;
+        }
+    }
+    // If dead
+    else if (count == 3) {
+        return 255;    // Now alive.
+    }
+    return state;
+}
+
+uchar isTwoFiveFive(uchar input) {
+    if (input == 255) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Worker that processes part of the image.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+void worker(chanend c_fromDist) {
+    uint32_t lines[3];
+    uchar results[30];
+    uchar count = 0;
+    uchar state = 0;
+    while (1) {
+        for (int i = 0; i < 3; i++) {
+
+            c_fromDist :> lines[i];
+        }
+        for (int j = 1 ; j < 31; j++) { // goes through each bit in the input
+            count = 0;
+            state = 0;
+            for (int i = 0; i < 3; i++) { // goes through each row
+                count = count + isTwoFiveFive(returnBitInt(lines[i], j + 1));
+                count = count + isTwoFiveFive(returnBitInt(lines[i], j - 1));
+                if (i != 1) {
+                    count = count + isTwoFiveFive(returnBitInt(lines[i], j));
+                }
+                else {
+                    state = returnBitInt(lines[i], j);
+                }
+            }
+            results[j - 1] = deadOrAlive(state, count);
+            printf("- %d -", results[j - 1]);
+        }
+        printf("\n");
+        uint32_t output = bytesToBits(results, 30);
+        printBinary(output);
+        c_fromDist <: output;
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -174,16 +329,19 @@ int main(void) {
 
 i2c_master_if i2c[1];               //interface to orientation
 
+
 char infname[] = "test.pgm";     //put your input image path here
 char outfname[] = "testout.pgm"; //put your output image path here
 chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
+chan c_workers[NumberOfWorkers];
 
 par {
     i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
     orientation(i2c[0],c_control);        //client thread reading orientation data
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
+    distributor(c_inIO, c_outIO, c_control, c_workers, NumberOfWorkers);//thread to coordinate work on image
+    worker(c_workers[0]);                  // thread to do work on an image.
   }
 
   return 0;
