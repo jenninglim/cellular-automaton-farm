@@ -414,10 +414,19 @@
 <fInfo name="buttonListener" global="true" specialize="false" noreturn="true" doNotSpecialize="false" numParams="2">
   <arg num="0" specialize="false">
     <values>
+      <value type="unknown"/>
     </values>
   </arg>
   <arg num="1" specialize="false">
     <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+</fInfo>
+<fInfo name="countLiveCells" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="1">
+  <arg num="0" specialize="false">
+    <values>
+      <value type="unknown"/>
     </values>
   </arg>
 </fInfo>
@@ -439,7 +448,7 @@
     </values>
   </arg>
 </fInfo>
-<fInfo name="distributor" global="true" specialize="true" noreturn="false" doNotSpecialize="false" numParams="5">
+<fInfo name="distributor" global="true" specialize="true" noreturn="false" doNotSpecialize="false" numParams="7">
   <arg num="0" specialize="false">
     <values>
       <value type="unknown"/>
@@ -460,7 +469,17 @@
       <value type="unknown"/>
     </values>
   </arg>
-  <arg num="4" specialize="true">
+  <arg num="4" specialize="false">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="5" specialize="false">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="6" specialize="true">
     <values>
       <value type="intval"><intval isSigned="true" val="2"/></value>
     </values>
@@ -471,7 +490,9 @@
     <arg num="1"><values><value type="unknown"/></values></arg>
     <arg num="2"><values><value type="unknown"/></values></arg>
     <arg num="3"><values><value type="unknown"/></values></arg>
-    <arg num="4"><values><value type="intval"><intval isSigned="true" val="2"/></value></values></arg>
+    <arg num="4"><values><value type="unknown"/></values></arg>
+    <arg num="5"><values><value type="unknown"/></values></arg>
+    <arg num="6"><values><value type="intval"><intval isSigned="true" val="2"/></value></values></arg>
    </specialization>
  </specializations>
 </fInfo>
@@ -494,8 +515,8 @@
 <fInfo name="i2c_master" global="true" specialize="true" noreturn="false" doNotSpecialize="false" numParams="5">
   <arg num="0" specialize="false">
     <values>
-      <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="/Users/toddym42/Dev/Concurrent Computing/TB1_Project/cellular-automaton-farm/xTimeFiles/lib_i2c/src/i2c_master_async.xc" impId="0" param="0"/></value>
       <value type="interface"><interfaceInfo index="0" type="dist" func="_Si2c_master_0" global="true" impUnit="../src/main.xc" impId="0" param="0"/></value>
+      <value type="interface"><interfaceInfo index="0" type="dist" func="i2c_master" global="true" impUnit="/Users/toddym42/Dev/Concurrent Computing/TB1_Project/cellular-automaton-farm/xTimeFiles/lib_i2c/src/i2c_master_async.xc" impId="0" param="0"/></value>
     </values>
   </arg>
   <arg num="1" specialize="true">
@@ -823,10 +844,12 @@
 <fInfo name="showLEDs" global="true" specialize="false" noreturn="false" doNotSpecialize="false" numParams="2">
   <arg num="0" specialize="false">
     <values>
+      <value type="unknown"/>
     </values>
   </arg>
   <arg num="1" specialize="false">
     <values>
+      <value type="unknown"/>
     </values>
   </arg>
 </fInfo>
@@ -992,7 +1015,7 @@
 </fCall>
 <fCall name="orientation" global="true" callerUnit="../src/main.xc" numArgs="2" impId="1" specializationId="0">
 </fCall>
-<fCall name="distributor" global="true" callerUnit="../src/main.xc" numArgs="5" impId="4" specializationId="0">
+<fCall name="distributor" global="true" callerUnit="../src/main.xc" numArgs="7" impId="4" specializationId="0">
 </fCall>
 <fCall name="i2c_master" global="true" callerUnit="/Users/toddym42/Dev/Concurrent Computing/TB1_Project/cellular-automaton-farm/xTimeFiles/lib_i2c/src/i2c_master_async.xc" numArgs="5" impId="0" specializationId="0">
 </fCall>

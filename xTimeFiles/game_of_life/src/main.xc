@@ -13,6 +13,15 @@
 #define ROUNDS 10  // Numbers of rounds to be processed.
 #define WORKERS 2  // Number of workers processing the image.
 
+#define SW2 13  // SW2 button signal.
+#define SW1 14  // SW1 button signal.
+
+#define OFF  0
+#define GRNO 1
+#define BLU  2
+#define GRN  4
+#define RED  8
+
 typedef unsigned char uchar;  // Using uchar as shorthand.
 
 port p_scl = XS1_PORT_1E;     // Interface ports to orientation.
@@ -30,14 +39,18 @@ port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
-// on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
+out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 
-//DISPLAYS an LED pattern
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// DISPLAYS an LED pattern
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 int showLEDs(out port p, chanend fromVisualiser) {
-  int pattern; //1st bit...separate green LED
-               //2nd bit...blue LED
-               //3rd bit...green LED
-               //4th bit...red LED
+  int pattern; //1st bit...separate green LED  int = 1
+               //2nd bit...blue LED            int = 2
+               //3rd bit...green LED           int = 4
+               //4th bit...red LED             int = 8
   while (1) {
     fromVisualiser :> pattern;   //receive new pattern from visualiser
     p <: pattern;                //send pattern to LED port
@@ -45,15 +58,37 @@ int showLEDs(out port p, chanend fromVisualiser) {
   return 0;
 }
 
-//READ BUTTONS and send button pattern to userAnt
-void buttonListener(in port b, chanend toUserAnt) {
-  int r;
-  while (1) {
-    b when pinseq(15)  :> r;    // check that no button is pressed
-    b when pinsneq(15) :> r;    // check if some buttons are pressed
-    if ((r==13) || (r==14))     // if either button is pressed
-    toUserAnt <: r;             // send button pattern to userAnt
-  }
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// READ BUTTONS and send button pattern to distributor.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+void buttonListener(in port b, chanend c_toDist) {
+    int r;
+    while (1) {
+        b when pinseq(15)  :> r;     // check that no button is pressed
+        b when pinsneq(15) :> r;     // check if some buttons are pressed
+        if (r == SW1 || r == SW2) {  // if either button is pressed
+            c_toDist <: r;           // send button pattern to userAnt
+        }
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Counts the number of live cells in an image.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+int countLiveCells(uchar image[IMHT][IMWD]) {
+    int count = 0;
+    for (int y = 0; y < IMHT; y++) {
+        for (int x = 0; x < IMWD; x++) {
+            if (image[x][y] == 255) {
+                count ++;
+            }
+        }
+    }
+    return count;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -96,14 +131,24 @@ uchar DataInStream(char infname[], chanend c_out) {
 // Distributor that farms out parts of the image to worker threads who the Game of Life!
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorker[n], unsigned n) {
+void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorker[n], unsigned n) {
     uchar image[IMWD][IMHT];  // The whole image being processed.
     uchar pixel;              // A single pixel being sent to a worker.
+    int buttonPressed, tilted;
 
-    // Start up and wait for tilting of the xCore-200 Explorer.
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
-    printf( "Waiting for Board Tilt...\n" );
-    fromAcc :> int value;
+
+    // Start up and wait for SW1 button press on the xCore-200 Explorer.
+    printf( "Waiting for SW1 button press...\n" );
+    int initiated = 0;
+    while (!initiated) {
+        c_fromButtons :> buttonPressed;
+        // printf("button %d pressed!\n", buttonPress);
+        if (buttonPressed == SW1) {
+            initiated = 1;
+            c_toLEDs <: GRN;
+        }
+    }
 
     // Read in the image from DataInStream.
     printf( "Populating image array...\n" );
@@ -113,79 +158,130 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
             c_in :> image[x][y];
         }
     }
+    c_toLEDs <: OFF;
 
     // Processing the rounds.
     printf("\nProcessing...\n");
-    for (int r = 0; r < ROUNDS; r++) {
-        // Send the image pixel by pixel to the workers.
-        for (int y = 0; y < IMHT; y++) {
-            for( int x = 0; x < IMWD; x++ ) {
-                pixel = image[x][y];
-                // On the boundaries between worker segments, send to both workers.
-                if (x == 0 ||
-                    x == ((IMWD / 2) -1) ||
-                    x == (IMWD / 2) ||
-                    x == IMWD - 1) {
-                        c_toWorker[0] <: pixel;
-                        c_toWorker[1] <: pixel;
-                }
-                // else send the first half to worker 0
-                else if (x < (IMWD / 2)) {
-                    c_toWorker[0] <: pixel;
-                }
-                // and the second half to worker 1.
-                else {
-                    c_toWorker[1] <: pixel;
-                }
-            }
-        }
-        //printf("\n");
+    int round = 1;
+    int running = 1;
+    timer t;
+    double start, stop;
+    t :> start;
+    start /= 100000000;
 
-        // Create a new image with the updated values.
-        //uchar newImage[IMWD][IMHT];  // The new image.
-        int x0 = 0;
-        int y0 = 0;
-        int x1 = IMWD/2;
-        int y1 = 0;
-        while (y0 < IMHT || y1 < IMHT) {
-            select {
-                case c_toWorker[0] :> pixel:
-                    //printf("from 0: (%d,%d) = %d\n", x0, y0, pixel);
-                    image[x0][y0] = pixel;
-                    x0++;
-                    if (x0 == IMWD/2) {
-                        x0 = 0;
-                        y0++;
-                    }
-                    break;
-                case c_toWorker[1] :> pixel:
-                    //printf("from 1: (%d,%d) = %d\n", x1, y1, pixel);
-                    image[x1][y1] = pixel;
-                    x1++;
-                    if (x1 == IMWD) {
-                        x1 = IMWD/2;
-                        y1++;
-                    }
-                    break;
-            }
+    while (running) {
+        // Alternate the other green light on and off each round while processing.
+        if (round % 2 == 0) {
+            c_toLEDs <: GRNO;
         }
-        //printf("x0:%d, y0:%d, x1:%d, y1:%d\n", x0, y0, x1, y1);
-        printf( "Processing round %d complete...\n", r+1);
+        else {
+            c_toLEDs <: OFF;
+        }
+
+        select {
+            // Button pressed.
+            case c_fromButtons :> buttonPressed:
+                if (buttonPressed == SW2) {
+                    // Print and save the pixel.
+                    c_toLEDs <: BLU;
+                    printf("\nSaving the new image after %d rounds...\n", round-1);
+                    printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
+                    for (int y = 0; y < IMHT; y++) {
+                        printf("[%2.1d]", y);
+                        for (int x = 0; x < IMWD; x++) {
+                            c_out <: image[x][y];
+                            printf( "-%4.1d ", image[x][y]);
+                        }
+                        printf("\n");
+                    }
+                    c_toLEDs <: OFF;
+                    running = 0;
+                }
+                else if (buttonPressed == SW1) {  // Temp home for tilt logic.
+                    c_toLEDs <: RED;
+                    int alive = countLiveCells(image);
+                    t :> stop;
+                    stop /= 100000000;
+                    double time = stop - start;
+
+                    printf("\n----------------------------------\n"
+                            "STATUS REPORT:\n"
+                            "Rounds Processed: %d\n"
+                            "Live Cells: %d / %d\n"
+                            "Time Elapsed: %.4lf seconds\n"
+                            "----------------------------------\n",
+                            round-1, alive, IMHT*IMWD, time);
+
+                    c_fromButtons :> buttonPressed;
+                    c_toLEDs <: OFF;
+                }
+                break;
+            // Board tilted.
+            case fromAcc :> tilted:
+                printf("DIST: BOARD TILTED!\n\n");
+                c_toLEDs <: RED;
+                fromAcc :> tilted;
+                c_toLEDs <: OFF;
+                break;
+            // Continue processing the image.
+            default:
+                // Send the image pixel by pixel to the workers.
+                for (int y = 0; y < IMHT; y++) {
+                    for( int x = 0; x < IMWD; x++ ) {
+                        pixel = image[x][y];
+                        // On the boundaries between worker segments, send to both workers.
+                        if (x == 0 ||
+                            x == ((IMWD / 2) -1) ||
+                            x == (IMWD / 2) ||
+                            x == IMWD - 1) {
+                                c_toWorker[0] <: pixel;
+                                c_toWorker[1] <: pixel;
+                        }
+                        // else send the first half to worker 0
+                        else if (x < (IMWD / 2)) {
+                            c_toWorker[0] <: pixel;
+                        }
+                        // and the second half to worker 1.
+                        else {
+                            c_toWorker[1] <: pixel;
+                        }
+                    }
+                }
+
+                // Create a new image with the updated values.
+                int x0 = 0;
+                int y0 = 0;
+                int x1 = IMWD/2;
+                int y1 = 0;
+                while (y0 < IMHT || y1 < IMHT) {
+                    select {
+                        case c_toWorker[0] :> pixel:
+                            //printf("from 0: (%d,%d) = %d\n", x0, y0, pixel);
+                            image[x0][y0] = pixel;
+                            x0++;
+                            if (x0 == IMWD/2) {
+                                x0 = 0;
+                                y0++;
+                            }
+                            break;
+                        case c_toWorker[1] :> pixel:
+                            //printf("from 1: (%d,%d) = %d\n", x1, y1, pixel);
+                            image[x1][y1] = pixel;
+                            x1++;
+                            if (x1 == IMWD) {
+                                x1 = IMWD/2;
+                                y1++;
+                            }
+                            break;
+                    }
+                }
+                //printf("x0:%d, y0:%d, x1:%d, y1:%d\n", x0, y0, x1, y1);
+                //printf( "Processing round %d complete...\n", round);
+                round++;
+                break;
+        }
     }
 
-    // Print and save the pixel.
-    printf("\nSaving the new image...\n");
-    printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
-    for (int y = 0; y < IMHT; y++) {
-        printf("[%2.1d]", y);
-        for (int x = 0; x < IMWD; x++) {
-            c_out <: image[x][y];
-            printf( "-%4.1d ", image[x][y]);
-        }
-        printf("\n");
-    }
-
-    //printf( "One processing round completed...\n" );
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -334,11 +430,28 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 
         // Get new x-axis tilt value.
         int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
-
-        // Send signal to distributor after first tilt.
+        //printf("x = %d\n", x);
+        /* Send signal to distributor after first tilt.
         if (!tilted) {
             if (x>30) {
                 tilted = 1 - tilted;
+                toDist <: 1;
+            }
+        }
+        */
+        if (!tilted) {
+            //printf("here1\n");
+            if (x > 30) {
+              //  printf("here2\n");
+                tilted = 1;
+                toDist <: 1;
+            }
+        }
+        else {
+            //printf("here3\n");
+            if (x < 30) {
+                //printf("here4\n");
+                tilted = 0;
                 toDist <: 1;
             }
         }
@@ -359,18 +472,19 @@ int main(void) {
     char outfname[] = "testout.pgm";  // put your output image path here
     chan c_inIO, c_outIO, c_control;   // extend your channel definitions here
     chan c_workers[WORKERS];                 // worker channels (one for each worker).
+    chan c_buttonsToDist, c_DistToLEDs;   //
 
     par {
         i2c_master(i2c, 1, p_scl, p_sda, 10);  // server thread providing orientation data.
         orientation(i2c[0],c_control);         // client thread reading orientation data.
         DataInStream(infname, c_inIO);         // thread to read in a PGM image.
         DataOutStream(outfname, c_outIO);      // thread to write out a PGM image.
-        distributor(c_inIO, c_outIO, c_control, c_workers, WORKERS);  // thread to coordinate work on image.
+        distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, WORKERS);  // thread to coordinate work on image.
         worker(c_workers[0], 0);               // thread to do work on an image.
         worker(c_workers[1], 1);               // thread to do work on an image.
         
-        //buttonListener(buttons, buttonsToUserAnt);
-        // showLEDs(leds,visualiserToLEDs);
+        buttonListener(buttons, c_buttonsToDist);
+        showLEDs(leds, c_DistToLEDs);
     }
 
   return 0;
