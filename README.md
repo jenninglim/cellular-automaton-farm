@@ -1,18 +1,16 @@
 # Cellular-automaton-farm
-**TODO**
+## Ideas
 
-1. Query warnings.
-2. Do pointers work the same in XC?
-3. Make uchar implementation work with Geometric Parallelism.
-4. Make uchar implementation work with Farming.
+* Use 2 bits of the 32 bits to store the edge cases.  
+Distributors keeps track of this. (When the size of the image is not divisible by 32)
 
-Extension
+## Todo
 
-1. Split the bytes into bits.
-2. extend to include arbitrary size images (i.e. not just dimensions that are powers of 2).
-3. implement function that returns an element in x and y position in a 32 bit character array.
-4. Identify the sparse parts of the map and disregard using bit manipulation (after we have finished bytes to bits).
+1. Translate the program to work with bits.
+2. Implement workers, (aim for generality).
+3. Distributor sends of a 3 ints to each worker.
 
-  Using bit manipulation and OR operations we can find "dead" areas of the map.
-  Potentially, start disregarding multiple dead zones on the same row (the distributor must keep track the location that is sent to the worker).
-
+## Extension
+* Compress uint32 by reducing 0s. (Requires thorough formalisations).
+ 
+ Distributor must keep track of the index in the int and the length of the compressed bits
