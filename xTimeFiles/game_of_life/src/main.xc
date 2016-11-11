@@ -11,6 +11,7 @@
 #define IMWD 16   // Image width.
 
 #define ROUNDS 10  // Numbers of rounds to be processed.
+#define WORKERS 2  // Number of workers processing the image.
 
 typedef unsigned char uchar;  // Using uchar as shorthand.
 
@@ -28,6 +29,32 @@ port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
+in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
+// on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
+
+//DISPLAYS an LED pattern
+int showLEDs(out port p, chanend fromVisualiser) {
+  int pattern; //1st bit...separate green LED
+               //2nd bit...blue LED
+               //3rd bit...green LED
+               //4th bit...red LED
+  while (1) {
+    fromVisualiser :> pattern;   //receive new pattern from visualiser
+    p <: pattern;                //send pattern to LED port
+  }
+  return 0;
+}
+
+//READ BUTTONS and send button pattern to userAnt
+void buttonListener(in port b, chanend toUserAnt) {
+  int r;
+  while (1) {
+    b when pinseq(15)  :> r;    // check that no button is pressed
+    b when pinsneq(15) :> r;    // check if some buttons are pressed
+    if ((r==13) || (r==14))     // if either button is pressed
+    toUserAnt <: r;             // send button pattern to userAnt
+  }
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -331,16 +358,19 @@ int main(void) {
     char infname[] = "test.pgm";      // put your input image path here
     char outfname[] = "testout.pgm";  // put your output image path here
     chan c_inIO, c_outIO, c_control;   // extend your channel definitions here
-    chan c_workers[2];                 // worker channels (one for each worker).
+    chan c_workers[WORKERS];                 // worker channels (one for each worker).
 
     par {
         i2c_master(i2c, 1, p_scl, p_sda, 10);  // server thread providing orientation data.
         orientation(i2c[0],c_control);         // client thread reading orientation data.
         DataInStream(infname, c_inIO);         // thread to read in a PGM image.
         DataOutStream(outfname, c_outIO);      // thread to write out a PGM image.
-        distributor(c_inIO, c_outIO, c_control, c_workers, 2);  // thread to coordinate work on image.
+        distributor(c_inIO, c_outIO, c_control, c_workers, WORKERS);  // thread to coordinate work on image.
         worker(c_workers[0], 0);               // thread to do work on an image.
         worker(c_workers[1], 1);               // thread to do work on an image.
+        
+        //buttonListener(buttons, buttonsToUserAnt);
+        // showLEDs(leds,visualiserToLEDs);
     }
 
   return 0;
