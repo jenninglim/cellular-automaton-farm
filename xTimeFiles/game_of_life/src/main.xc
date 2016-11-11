@@ -7,8 +7,10 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define IMHT 16  // Image height.
-#define IMWD 16  // Image width.
+#define IMHT 16   // Image height.
+#define IMWD 16   // Image width.
+
+#define ROUNDS 10  // Numbers of rounds to be processed.
 
 typedef unsigned char uchar;  // Using uchar as shorthand.
 
@@ -68,82 +70,95 @@ uchar DataInStream(char infname[], chanend c_out) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorker[n], unsigned n) {
-    uchar pixel;                 // A single pixel being read in.
+    uchar image[IMWD][IMHT];  // The whole image being processed.
+    uchar pixel;              // A single pixel being sent to a worker.
 
     // Start up and wait for tilting of the xCore-200 Explorer.
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
     printf( "Waiting for Board Tilt...\n" );
     fromAcc :> int value;
 
-    // Send the image pixel by pixel to the workers.
-    printf( "Populating image arrays...\n" );
+    // Read in the image from DataInStream.
+    printf( "Populating image array...\n" );
     printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n[ 0]");
     for (int y = 0; y < IMHT; y++) {
-        for( int x = 0; x < IMWD; x++ ) {
-            c_in :> pixel;
-            // On the boundaries between worker segments, send to both workers.
-            if (x == 0 ||
-                x == ((IMWD / 2) -1) ||
-                x == (IMWD / 2) ||
-                x == IMWD - 1) {
-                    c_toWorker[0] <: pixel;
-                    c_toWorker[1] <: pixel;
-            }
-            // else send the first half to worker 0
-            else if (x < (IMWD / 2)) {
-                c_toWorker[0] <: pixel;
-            }
-            // and the second half to worker 1.
-            else {
-                c_toWorker[1] <: pixel;
-            }
+        for (int x = 0; x < IMWD; x++ ) {
+            c_in :> image[x][y];
         }
     }
-    printf("\n");
 
-    // Create a new image with the updated values.
-    uchar newImage[IMWD][IMHT];  // The new image.
-    int x0 = 0;
-    int y0 = 0;
-    int x1 = IMWD/2;
-    int y1 = 0;
-    while (y0 < IMHT || y1 < IMHT) {
-        select {
-            case c_toWorker[0] :> pixel:
-                //printf("from 0: (%d,%d) = %d\n", x0, y0, pixel);
-                newImage[x0][y0] = pixel;
-                x0++;
-                if (x0 == IMWD/2) {
-                    x0 = 0;
-                    y0++;
+    // Processing the rounds.
+    printf("\nProcessing...\n");
+    for (int r = 0; r < ROUNDS; r++) {
+        // Send the image pixel by pixel to the workers.
+        for (int y = 0; y < IMHT; y++) {
+            for( int x = 0; x < IMWD; x++ ) {
+                pixel = image[x][y];
+                // On the boundaries between worker segments, send to both workers.
+                if (x == 0 ||
+                    x == ((IMWD / 2) -1) ||
+                    x == (IMWD / 2) ||
+                    x == IMWD - 1) {
+                        c_toWorker[0] <: pixel;
+                        c_toWorker[1] <: pixel;
                 }
-                break;
-            case c_toWorker[1] :> pixel:
-                //printf("from 1: (%d,%d) = %d\n", x1, y1, pixel);
-                newImage[x1][y1] = pixel;
-                x1++;
-                if (x1 == IMWD) {
-                    x1 = IMWD/2;
-                    y1++;
+                // else send the first half to worker 0
+                else if (x < (IMWD / 2)) {
+                    c_toWorker[0] <: pixel;
                 }
-                break;
+                // and the second half to worker 1.
+                else {
+                    c_toWorker[1] <: pixel;
+                }
+            }
         }
+        //printf("\n");
+
+        // Create a new image with the updated values.
+        //uchar newImage[IMWD][IMHT];  // The new image.
+        int x0 = 0;
+        int y0 = 0;
+        int x1 = IMWD/2;
+        int y1 = 0;
+        while (y0 < IMHT || y1 < IMHT) {
+            select {
+                case c_toWorker[0] :> pixel:
+                    //printf("from 0: (%d,%d) = %d\n", x0, y0, pixel);
+                    image[x0][y0] = pixel;
+                    x0++;
+                    if (x0 == IMWD/2) {
+                        x0 = 0;
+                        y0++;
+                    }
+                    break;
+                case c_toWorker[1] :> pixel:
+                    //printf("from 1: (%d,%d) = %d\n", x1, y1, pixel);
+                    image[x1][y1] = pixel;
+                    x1++;
+                    if (x1 == IMWD) {
+                        x1 = IMWD/2;
+                        y1++;
+                    }
+                    break;
+            }
+        }
+        //printf("x0:%d, y0:%d, x1:%d, y1:%d\n", x0, y0, x1, y1);
+        printf( "Processing round %d complete...\n", r+1);
     }
-    //printf("x0:%d, y0:%d, x1:%d, y1:%d\n", x0, y0, x1, y1);
 
     // Print and save the pixel.
-    printf("Processing...\n");
+    printf("\nSaving the new image...\n");
     printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
     for (int y = 0; y < IMHT; y++) {
         printf("[%2.1d]", y);
         for (int x = 0; x < IMWD; x++) {
-            c_out <: newImage[x][y];
-            printf( "-%4.1d ", newImage[x][y]);
+            c_out <: image[x][y];
+            printf( "-%4.1d ", image[x][y]);
         }
         printf("\n");
     }
 
-    printf( "One processing round completed...\n" );
+    //printf( "One processing round completed...\n" );
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -153,72 +168,75 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorke
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend c_fromDist, int n) {
     uchar image[IMWD/2 + 2][IMHT];
-    // Reading in the worker's part of the image.
-    if (n == 0) {  // Worker 0.
-        for (int y = 0; y < IMHT; y++) {
-            for( int x = 0; x < (IMWD/2 + 2); x++ ) {
-                if (x == IMWD/2 + 1) {  // gets the last column (of the whole image) last; puts it in column 0.
-                    c_fromDist :> image[0][y];
-                }
-                else {
-                    c_fromDist :> image[x+1][y];
-                }
-            }
-        }
-    }
-    else {  // Worker 1.
-        for (int y = 0; y < IMHT; y++) {
-            for( int x = 0; x < (IMWD/2 + 2); x++ ) {  // Start from column 1 as 0 is an overlap.
-                if (x == 0) {  // get the first column (of the whole image) first; puts it at the end.
-                    c_fromDist :> image[IMWD/2 + 1][y];
-                }
-                else {
-                    c_fromDist :> image[x-1][y];
-                }
-            }
-        }
 
-    }
-    printf("Worker %d finished populating...\n", n);
-
-    // Workers analyse potential changes for the next round.
-    for (int y = 0; y < IMHT; y++) {
-        for (int x = 1; x < (IMWD/2 + 1); x++) {  // Start from column 1 as 0 is an overlap.
-            int count = 0;
-            for (int j = 0; j < 3; j++) {
-                for (int i = 0; i < 3; i++) {
-                    if (i == 1 && j == 1) {
-                        i++;
+    while (1) {
+        // Reading in the worker's part of the image.
+        if (n == 0) {  // Worker 0.
+            for (int y = 0; y < IMHT; y++) {
+                for( int x = 0; x < (IMWD/2 + 2); x++ ) {
+                    if (x == IMWD/2 + 1) {  // gets the last column (of the whole image) last; puts it in column 0.
+                        c_fromDist :> image[0][y];
                     }
-                    if (image[(x + i - 1 + (IMWD/2+2)) % (IMWD/2+2)][(y + j - 1 + IMHT) % IMHT] == 255) {
-                        count++;
+                    else {
+                        c_fromDist :> image[x+1][y];
                     }
                 }
             }
-            /* LOGIC FOR IF CELL WILL CHANGE:
-            • any live cell with fewer than two live neighbours dies.
-            • any live cell with two or three live neighbours is unaffected.
-            • any live cell with more than three live neighbours dies.
-            • any dead cell with exactly three live neighbours becomes alive.
-            */
-            uchar zero = 0;
-            uchar twofivefive = 255;
-            // If alive
-            if (image[x][y] == 255) {
-                if (count < 2 || count > 3) {
-                    c_fromDist <: zero;  // Now dead.
+        }
+        else {  // Worker 1.
+            for (int y = 0; y < IMHT; y++) {
+                for( int x = 0; x < (IMWD/2 + 2); x++ ) {  // Start from column 1 as 0 is an overlap.
+                    if (x == 0) {  // get the first column (of the whole image) first; puts it at the end.
+                        c_fromDist :> image[IMWD/2 + 1][y];
+                    }
+                    else {
+                        c_fromDist :> image[x-1][y];
+                    }
                 }
+            }
+
+        }
+        //printf("Worker %d finished populating...\n", n);
+
+        // Workers analyse potential changes for the next round.
+        for (int y = 0; y < IMHT; y++) {
+            for (int x = 1; x < (IMWD/2 + 1); x++) {  // Start from column 1 as 0 is an overlap.
+                int count = 0;
+                for (int j = 0; j < 3; j++) {
+                    for (int i = 0; i < 3; i++) {
+                        if (i == 1 && j == 1) {
+                            i++;
+                        }
+                        if (image[(x + i - 1 + (IMWD/2+2)) % (IMWD/2+2)][(y + j - 1 + IMHT) % IMHT] == 255) {
+                            count++;
+                        }
+                    }
+                }
+                /* LOGIC FOR IF CELL WILL CHANGE:
+                • any live cell with fewer than two live neighbours dies.
+                • any live cell with two or three live neighbours is unaffected.
+                • any live cell with more than three live neighbours dies.
+                • any dead cell with exactly three live neighbours becomes alive.
+                */
+                uchar zero = 0;
+                uchar twofivefive = 255;
+                // If alive
+                if (image[x][y] == 255) {
+                    if (count < 2 || count > 3) {
+                        c_fromDist <: zero;  // Now dead.
+                    }
+                    else {
+                        c_fromDist <: image[x][y];
+                    }
+                }
+                // If dead
+                else if (count == 3) {
+                    c_fromDist <: twofivefive;  // Now alive.
+                }
+                // No change.
                 else {
                     c_fromDist <: image[x][y];
                 }
-            }
-            // If dead
-            else if (count == 3) {
-                c_fromDist <: twofivefive;  // Now alive.
-            }
-            // No change.
-            else {
-                c_fromDist <: image[x][y];
             }
         }
     }
