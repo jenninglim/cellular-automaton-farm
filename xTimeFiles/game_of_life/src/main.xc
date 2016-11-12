@@ -66,7 +66,7 @@ uint32_t bytesToBits(uchar line[], uchar length) {
     return output;
 }
 
-/* ad hoc concatentation to uint32
+/* ad hoc concatentation to uint32 obselete
  * Input:
  *      head: addeds to the start of the array
  *      array: array to be modified
@@ -86,7 +86,30 @@ uint32_t formRow(uchar head, uchar array[], uchar length, uchar tail) {
     }
     return bytesToBits(temp, length + 2);
 }
+/*
+ * adhoc compress
+ */
+uint32_t compress(uchar array[], uchar length) {
+    uint32_t val;
+    for (int i = 0; i < length; i ++) {
+        if (array[i] == 255) {
+            val = val | 0x00000001 << (30 - i);
+        }
+    }
+    return val;
+}
 
+uint32_t assignEdges(uint32_t left, uint32_t middle,uchar midLength, uint32_t right) {
+    uint32_t val = middle;
+    if (returnBitInt(left,31) == 255) {
+        val = val | 0x00000001 << 31;
+    }
+    if (returnBitInt(right,1) == 255) {
+        val = val | 0x00000001 << (31 - midLength);
+        val = val | 0x00000001;
+    }
+    return val;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -96,10 +119,8 @@ uint32_t formRow(uchar head, uchar array[], uchar length, uchar tail) {
 void DataInStream(char infname[], chanend c_out)
 {
   int res;
-  uchar head[1];
-  uchar tail[1];
-  uchar line[32];
-  uint32_t linePart = 0;
+  uchar line[30];
+  uint32_t row[uintArrayWidth];
   uchar length = 0;
   printf( "DataInStream: Start...\n" );
 
@@ -110,18 +131,27 @@ void DataInStream(char infname[], chanend c_out)
     return;
   }
 
-  //Read image line-by-line and send byte by byte to channel c_out
-  for( int y = 0; y < IMHT; y++ ) { //goes through  the height of the read line.
+  for( int y = 0; y < IMHT; y++ ) {
+      length = 30;
+      //reads in a single row
       for (int i = 0; i < uintArrayWidth; i++ ) {
           if (i == ceil(IMWD / 30)) {
-              length = IMWD % 30 - 2;
+              length = IMWD % 30;
           }
           _readinline( line, length);
-          _readinline(tail, 1);
-          linePart = formRow(head[0] ,line,length, tail[0]);
-          c_out <: linePart;
-          head[0] = tail[0];
+          row[i] = compress(line,length);
       }
+
+      //assign edges to rows
+      for (int i = 0; i < uintArrayWidth; i++ ) {
+          length = 30;
+          if (i == ceil(IMWD / 30)) {
+              length = IMWD % 30;
+          }
+          row[i] = assignEdges(row[(i-1+uintArrayWidth) % uintArrayWidth], row[i],length, row[ (i + 1) %uintArrayWidth]);
+          c_out <: row[i];
+      }
+
   }
 
   //Close PGM image file
