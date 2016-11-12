@@ -1,7 +1,7 @@
 # Cellular-automaton-farm (geoByte implementation)
 **TODO**
 
-1. Pause processing on Tilt.
+1. Make code work for 1, 2 and 4 workers.
 
 **NOTES**
 
