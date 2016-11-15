@@ -12,15 +12,23 @@
 
 #define MAX_ROUNDS 100  // Maxiumum number of rounds to be processed.
 
-#define WORKERS 1  // Total number of workers processing the image.
-#define SINGLE 0   // Worker that processes and image all on its lonesome.
-#define LEFT   1   // Worker that processes the left-most segment of the image.
-#define CENTRE 2   // Worker that processes one of the centre segments of the image.
-#define RIGHT  3   // Worker that processes the right-most segment of the image.
+#define WORKERS 4  // Total number of workers processing the image.
 
+// Worker Types.
+#define SINGLE 0   // Worker that processes an image all on its own!
+#define LEFT   1   // Worker that processes the left-most segment of an image.
+#define CENTRE 2   // Worker that processes one of the centre segments of an image.
+#define RIGHT  3   // Worker that processes the right-most segment of an image.
+
+// Port to access xCORE-200 buttons.
+on tile[0]: in port buttons = XS1_PORT_4E;
+// Buttons signals.
 #define SW2 13     // SW2 button signal.
 #define SW1 14     // SW1 button signal.
 
+// Port to access xCore-200 LEDs.
+on tile[0]: out port leds = XS1_PORT_4F;
+// LED signals.
 #define OFF  0     // Signal to turn the LED off.
 #define GRNS 1     // Signal to turn the separate green LED on.
 #define BLU  2     // Signal to turn the blue LED on.
@@ -32,9 +40,6 @@ typedef unsigned char uchar;  // Using uchar as shorthand.
 // Interface ports to orientation.
 on tile[0]: port p_scl = XS1_PORT_1E;
 on tile[0]: port p_sda = XS1_PORT_1F;
-//port p_scl = XS1_PORT_1E;
-//port p_sda = XS1_PORT_1F;
-
 // Register addresses for orientation.
 #define FXOS8700EQ_I2C_ADDR 0x1E
 #define FXOS8700EQ_XYZ_DATA_CFG_REG 0x0E
@@ -47,13 +52,9 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-on tile[0]: in port buttons = XS1_PORT_4E;  // Port to access xCore-200 buttons
-on tile[0]: out port leds = XS1_PORT_4F;    // Port to access xCore-200 LEDs
-//in port buttons = XS1_PORT_4E;  // Port to access xCore-200 buttons
-//out port leds = XS1_PORT_4F;    // Port to access xCore-200 LEDs
-
-char infname[] = "test.pgm";         // Input image path
-char outfname[] = "testout.pgm";     // Output image path here
+// Image paths.
+char infname[] = "test.pgm";      // Input image path
+char outfname[] = "testout.pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -163,11 +164,9 @@ double getCurrentTime() {
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void printStatusReport(double start, double current, int round, uchar image[IMWD][IMHT], int final) {
-    int alive = countLiveCells(image);  // The number of live cells in image.
-    double time;               // Current time and total time elapsed.
-
-    time = current - start;
+void printStatusReport(double start, double current, int rounds, uchar image[IMWD][IMHT], int final) {
+    int alive = countLiveCells(image);  // The number of live cells in the image.
+    double time = current - start;      // Total time elapsed.
 
     printf("\n----------------------------------\n");
     if (final) {
@@ -181,7 +180,7 @@ void printStatusReport(double start, double current, int round, uchar image[IMWD
            "Time Elapsed: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           round-1, alive, IMHT*IMWD, time, WORKERS);
+           rounds, alive, IMHT*IMWD, time, WORKERS);
 }
 
 
@@ -228,13 +227,6 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
     double current = getCurrentTime();  // Time after processing a round.
 
     while (running) {
-        // Alternate the separate green light on and off each round while running.
-        if (rounds % 2 == 0) {
-            c_toLEDs <: GRNS;
-        }
-        else {
-            c_toLEDs <: OFF;
-        }
 
         select {
             // When SW2 button is pressed, stop processing, print and save the current image.
@@ -259,69 +251,68 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
             // When the board is vertical, pause the state and print a status report.
             // Resume processing when horizontal again.
             case fromAcc :> tilted:
+                // Board vertical.
                 c_toLEDs <: RED;  // Turn ON the red LED to indicate that the state is PAUSED.
                 printStatusReport(start, current, rounds, image, 0);
 
+                // Board horizontal.
                 fromAcc :> tilted;
                 c_toLEDs <: OFF;  // Turn OFF the red LED to indicate that the state is UNPAUSED.
                 break;
 
             // Otherwise, continue processing the image.
             default:
-                // Send the image pixel by pixel to the workers.
-                // The image is split vertically (GEOMETRIC PARALLELISM).
-                while (rounds <= MAX_ROUNDS) {
+                while (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS IS PROCESSING A SPECIFIED NUMBER OF ROUNDS.
+                    // Alternate the separate green light on and off each round while processing rounds.
+                    if (rounds % 2 == 0) {
+                        c_toLEDs <: GRNS;
+                    }
+                    else {
+                        c_toLEDs <: OFF;
+                    }
+
+                    // SENDING THE IMAGE TO THE WORKERS.
+                    // The image is split vertically (GEOMETRIC PARALLELISM).
                     for (int y = 0; y < IMHT; y++) {
-                        for( int x = 0; x < IMWD; x++ ) {
-                            pixel = image[x][y];
+                        int fst = 0;  // Segment FIRST row counter.
+                        int lst = 1;  // Segment LAST row counter.
+
+                        for (int x = 0; x < IMWD; x++) {
+                            pixel = image[x][y];  // A single pixel in the image.
+
+                            // When only a single worker, send the pixels in sequence to the single worker.
                             if (WORKERS == 1) {
                                 c_toWorker[0] <: pixel;
                             }
-                            // When more than 1 worker, send the boundaries between worker segments to multiple workers.
-                            else if (  x   % (IMWD / WORKERS) == 0 ||  // First row of each worker segment.
-                                     (x+1) % (IMWD / WORKERS) == 0) {  // Last row of each worker segment.
-                                         if (WORKERS == 2) {
-                                             c_toWorker[0] <: pixel;
-                                             c_toWorker[1] <: pixel;
-                                         }
-                                         else if (WORKERS == 4) {
-                                             if (x == 0 || x == IMWD-1) {
-                                                 c_toWorker[0] <: pixel;
-                                                 c_toWorker[3] <: pixel;
-                                             }
-                                             else if (x+1 == IMWD/4 || x == IMWD/4) {
-                                                 c_toWorker[0] <: pixel;
-                                                 c_toWorker[1] <: pixel;
-                                             }
-                                             else if (x+1 == IMWD/2 || x == IMWD/2) {
-                                                 c_toWorker[1] <: pixel;
-                                                 c_toWorker[2] <: pixel;
-                                             }
-                                             else if (x+1 == 3*IMWD/4 || x == 3*IMWD/4) {
-                                                 c_toWorker[2] <: pixel;
-                                                 c_toWorker[3] <: pixel;
-                                             }
-                                         }
-                            }
-                            // Remainging non-boundary pixels then split between the workers..
+
+                            // When more than 1 worker, the boundaries between worker segments need sending to multiple workers.
                             else {
-                                if (x < IMWD/WORKERS) {
-                                    c_toWorker[0] <: pixel;
+                                // First row of each worker segment.
+                                if (x % (IMWD / WORKERS) == 0) {
+                                    c_toWorker[((fst-1) + WORKERS) % WORKERS] <: pixel;
+                                    c_toWorker[( fst    + WORKERS) % WORKERS] <: pixel;
+                                    fst++;
                                 }
-                                else if (x < 2*IMWD/WORKERS) {
-                                    c_toWorker[1] <: pixel;
+                                // Last row of each worker segment.
+                                else if ((x+1) % (IMWD / WORKERS) == 0) {
+                                    c_toWorker[((lst-1) + WORKERS) % WORKERS] <: pixel;
+                                    c_toWorker[( lst    + WORKERS) % WORKERS] <: pixel;
+                                    lst++;
                                 }
-                                // Only gets this far when there are 4 workers.
-                                else if (x < 3*IMWD/WORKERS) {
-                                    c_toWorker[2] <: pixel;
-                                }
+                                // Remainging non-boundary pixels then split between the workers.
                                 else {
-                                    c_toWorker[3] <: pixel;
+                                    for (int i = 0; i < WORKERS; i++) {
+                                        if (x < (i+1)*IMWD/WORKERS) {
+                                            c_toWorker[i] <: pixel;
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
+                    // RECEIVING UPDATES FROM THE WORKERS.
                     int x[WORKERS];  // Each workers x coordinate to update in the new image.
                     int y[WORKERS];  // Each workers y coordinate to update in the new image.
                     for (int i = 0; i < WORKERS; i++) {
@@ -329,7 +320,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                         y[i] = 0;
                     }
 
-                    int workerRows = 0;  // Number of rows completed for all workers.
+                    int workerRows = 0;  // Total number of rows completed by all workers.
                     while (workerRows < WORKERS * IMHT) {
                         select {
                             // Processed pixel received from worker i.
@@ -346,7 +337,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     }
                     current = getCurrentTime();
                     rounds++;
-                }
+                }  // END OF MAX_ROUNDS WHILE LOOP.
                 break;
         }
     }
@@ -418,6 +409,7 @@ void worker(chanend c_fromDist, int workerType) {
     uchar pixel;
     int segWD = IMWD/WORKERS + 2;  // The width of the segment.
     while (1) {
+        // Worker that processes the image all on its own!
         if (workerType == SINGLE) {
             for (int y = 0; y < IMHT; y++) {
                 for (int x = 0; x < IMWD; x++) {
@@ -426,7 +418,7 @@ void worker(chanend c_fromDist, int workerType) {
                     if (x == 0) {
                         image[segWD - 1][y] = pixel;
                     }
-                    else if (x == IMWD) {
+                    else if (x == IMWD-1) {
                         image[0][y] = pixel;
                     }
                 }
@@ -469,7 +461,7 @@ void worker(chanend c_fromDist, int workerType) {
 
         // Workers analyse their segment for potential changes for the next round.
         for (int y = 0; y < IMHT; y++) {
-            // Skip the first and last columns as provided for info only.
+            // Skip the first and last columns as they are boundaries provided for info only.
             for (int x = 1; x < (segWD - 1); x++) {
                 // Check the number of surrounding alive cells.
                 int count = aliveSurroundingCells(x, y, image);
@@ -477,7 +469,7 @@ void worker(chanend c_fromDist, int workerType) {
                 // Check the cells new mortality status.
                 uchar newStatus = deadOrAlive(image[x][y], count);
 
-                // Send it back to the distributor.
+                // Send the cell's new status back to the distributor.
                 c_fromDist <: newStatus;
             }
         }
@@ -583,27 +575,40 @@ int main(void) {
     chan c_buttonsToDist, c_DistToLEDs;  // Button and LED channels.
 
     par {
-        on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);      // Server thread providing orientation data.
         on tile[0]: orientation(i2c[0],c_control);             // Client thread reading orientation data.
         on tile[0]: DataInStream(infname, c_inIO);             // Thread to read in a PGM image.
         on tile[0]: DataOutStream(outfname, c_outIO);          // Thread to write out a PGM image.
-        on tile[1]: distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, WORKERS);  // Thread to coordinate work on image.
-        on tile[1]: worker(c_workers[0], SINGLE);                // Thread to do work on an image.
-        //on tile[1]: worker(c_workers[1], CENTRE);               // Thread to do work on an image.
-        //on tile[1]: worker(c_workers[2], CENTRE);                // Thread to do work on an image.
-        //on tile[1]: worker(c_workers[1], RIGHT);               // Thread to do work on an image.
+        // Only work on tile[0].
+        on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);      // Server thread providing orientation data.
         on tile[0]: buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
         on tile[0]: showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
-        /*
-        i2c_master(i2c, 1, p_scl, p_sda, 10);      // Server thread providing orientation data.
-        orientation(i2c[0],c_control);             // Client thread reading orientation data.
-        DataInStream(infname, c_inIO);             // Thread to read in a PGM image.
-        DataOutStream(outfname, c_outIO);          // Thread to write out a PGM image.
-        distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, WORKERS);  // Thread to coordinate work on image.
-        worker(c_workers[0], LEFT);                // Thread to do work on an image.
-        worker(c_workers[1], RIGHT);               // Thread to do work on an image.
-        buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
-        showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
+
+        on tile[1]: distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, WORKERS);  // Thread to coordinate work on image.
+
+        // SINGLE WORKER.
+        //on tile[1]: worker(c_workers[0], SINGLE);            // Thread to do work on an image.
+
+        /* 2 WORKERS.
+        on tile[1]: worker(c_workers[0], LEFT);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[1], RIGHT);             // Thread to do work on an image.
+        */
+
+        /* 4 WORKERS. */
+        on tile[1]: worker(c_workers[0], LEFT);                // Thread to do work on an image.
+        on tile[1]: worker(c_workers[1], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[2], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[3], RIGHT);               // Thread to do work on an image.
+
+
+        /* 8 WORKERS.
+        on tile[1]: worker(c_workers[0], LEFT);                // Thread to do work on an image.
+        on tile[1]: worker(c_workers[1], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[2], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[3], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[4], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[5], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[6], CENTRE);              // Thread to do work on an image.
+        on tile[1]: worker(c_workers[7], RIGHT);               // Thread to do work on an image.
         */
     }
 
