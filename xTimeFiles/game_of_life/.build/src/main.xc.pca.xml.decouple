@@ -22,7 +22,7 @@
 <fDef name="master_sent_data" global="true" interface="i2c_slave_callback_if" noreturn="false" doNotSpecialize="false" numParams="1"/>
 <fDef name="operation_complete" global="true" interface="i2c_master_async_if" noreturn="false" doNotSpecialize="false" numParams="0"/>
 <fDef name="orientation" global="true" noreturn="true" doNotSpecialize="false" numParams="2"/>
-<fDef name="printStatusReport" global="true" noreturn="false" doNotSpecialize="false" numParams="4"/>
+<fDef name="printStatusReport" global="true" noreturn="false" doNotSpecialize="false" numParams="5"/>
 <fDef name="read" global="true" interface="i2c_master_async_if" noreturn="false" doNotSpecialize="false" numParams="3"/>
 <fDef name="read" global="true" interface="i2c_master_if" noreturn="false" doNotSpecialize="false" numParams="4"/>
 <fDef name="read_reg" global="true" interface="i2c_master_if" noreturn="false" doNotSpecialize="true" numParams="4"/>
@@ -568,8 +568,6 @@
     </values>
   </arg>
 </fCall>
-<fCall name="getCurrentTime" global="true" numArgs="0">
-</fCall>
 <fCall name="printf" global="true" numArgs="1">
   <arg num="0">
     <values>
@@ -591,7 +589,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="printf" global="true" numArgs="5">
+<fCall name="printf" global="true" numArgs="6">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -615,6 +613,11 @@
   <arg num="4">
     <values>
       <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="5">
+    <values>
+      <value type="intval"><intval isSigned="true" val="1"/></value>
     </values>
   </arg>
 </fCall>
@@ -665,7 +668,9 @@
 </fCall>
 <fCall name="getCurrentTime" global="true" numArgs="0">
 </fCall>
-<fCall name="printStatusReport" global="true" numArgs="4">
+<fCall name="getCurrentTime" global="true" numArgs="0">
+</fCall>
+<fCall name="printStatusReport" global="true" numArgs="5">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -682,6 +687,11 @@
     </values>
   </arg>
   <arg num="3">
+    <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="4">
     <values>
       <value type="intval"><intval isSigned="true" val="1"/></value>
     </values>
@@ -725,7 +735,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="printStatusReport" global="true" numArgs="4">
+<fCall name="printStatusReport" global="true" numArgs="5">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -743,9 +753,16 @@
   </arg>
   <arg num="3">
     <values>
+      <value type="unknown"/>
+    </values>
+  </arg>
+  <arg num="4">
+    <values>
       <value type="intval"><intval isSigned="true" val="0"/></value>
     </values>
   </arg>
+</fCall>
+<fCall name="getCurrentTime" global="true" numArgs="0">
 </fCall>
 <fCall name="aliveSurroundingCells" global="true" numArgs="3">
   <arg num="0">
@@ -1021,7 +1038,7 @@
   </arg>
   <arg num="6">
     <values>
-      <value type="intval"><intval isSigned="true" val="2"/></value>
+      <value type="intval"><intval isSigned="true" val="1"/></value>
     </values>
   </arg>
 </fCall>
@@ -1037,19 +1054,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="worker" global="true" numArgs="2" impId="6">
-  <arg num="0">
-    <values>
-      <value type="unknown"/>
-    </values>
-  </arg>
-  <arg num="1">
-    <values>
-      <value type="intval"><intval isSigned="true" val="2"/></value>
-    </values>
-  </arg>
-</fCall>
-<fCall name="buttonListener" global="true" numArgs="2" impId="7">
+<fCall name="buttonListener" global="true" numArgs="2" impId="6">
   <arg num="0">
     <values>
       <value type="unknown"/>
@@ -1061,7 +1066,7 @@
     </values>
   </arg>
 </fCall>
-<fCall name="showLEDs" global="true" numArgs="2" impId="8">
+<fCall name="showLEDs" global="true" numArgs="2" impId="7">
   <arg num="0">
     <values>
       <value type="unknown"/>
