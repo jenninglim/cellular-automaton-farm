@@ -40,9 +40,9 @@ uchar returnBitInt(uint32_t queriedInt, uchar index) {
 }
 
 //for debug
-void printBinary(uint32_t queriedInt) {
-    for (int i = 0; i < 32; i ++) {
-        if ( (queriedInt & 0x00000001 << (31 - i)) == 0 ) {
+void printBinary(uint32_t queriedInt, uchar length) {
+    for (int i = 0; i < length; i ++) {
+        if ( (queriedInt & 0x00000001 << (30 - i)) == 0 ) {
             printf("0 ");
         }
         else {
@@ -90,7 +90,7 @@ uint32_t formRow(uchar head, uchar array[], uchar length, uchar tail) {
  * adhoc compress
  */
 uint32_t compress(uchar array[], uchar length) {
-    uint32_t val;
+    uint32_t val = 0;
     for (int i = 0; i < length; i ++) {
         if (array[i] == 255) {
             val = val | 0x00000001 << (30 - i);
@@ -140,8 +140,8 @@ void DataInStream(char infname[], chanend c_out)
           }
           _readinline( line, length);
           row[i] = compress(line,length);
-      }
 
+      }
       //assign edges to rows
       for (int i = 0; i < uintArrayWidth; i++ ) {
           length = 30;
@@ -170,11 +170,16 @@ void DataInStream(char infname[], chanend c_out)
 void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWorker[n], unsigned n)
 {
   uint32_t linePart[uintArrayWidth][IMHT];
-  uchar safe = 0;
-  uchar i = 0; //index for the width of input array
-  uchar j = 0; //index for height of input array
-  uchar k = 0;
-  uchar processing = 1;
+  uint32_t copyPart[uintArrayWidth][IMHT];
+
+  uchar safe = 0; // safe to send to workers
+
+  uchar i = 0;  //index for the width of input array
+  uchar j = 0;  //index for height of input array
+
+  uchar k = 0; //number of rows sent.
+  uchar l = 0; //number of columns sent.
+  uchar turn = 1; // turn number
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -184,35 +189,45 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWork
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
-  while (processing) {
-      if (i == uintArrayWidth - 1 && j == IMHT - 1 && k == IMHT) { processing = 0; }
+  while (turn) {
+      if (k == IMHT) { turn = 0; } //ends turn
+      if (j == 2) { // starts to work the worker.
+          for (int x = 0; x < 3 ; x++) {
+              c_toWorker[0] <: linePart[i][j - x + IMHT % IMHT];
+          }
+          safe = 0;
+      }
       select {
-        case c_in :> linePart[i % uintArrayWidth][j]:
-            if (j == 2) {
-                for (int x = 0; x < 3 ; x++) {
-                    c_toWorker[0] <: linePart[i % uintArrayWidth][j - x + IMHT % IMHT];
-                }
-            } else if (k + 3 <= j) {
-                safe = 1;
-            }
-            i++;
-            if (i % uintArrayWidth == 0) {
-                j++;
-            }
+        //case when receiving from the (main distributor).
+        case c_in :> linePart[i][j]:
+            i = i + 1 % uintArrayWidth;
+            if (i % uintArrayWidth == 0) { j++; } //increment height when i goes over the "edge";
             break;
+        //when safe for worker to send back data.
+        //case when receiving from the work.
         case safe => c_toWorker[0] :> uint32_t output:
+            copyPart[l][k % IMHT] = output;
             for (int x = 0; x < 3 ; x++) {
-                c_toWorker[0] <: linePart[0][(k +  - x + 1 + IMHT) % IMHT];
+                c_toWorker[0] <: linePart[l][(k - x + 2 + IMHT) % IMHT];
             }
-            k ++;
-            if (k + 3 > j) {
-                safe = 0;
-            }
+            l = l + 1 % uintArrayWidth;
+            if (l == 0) { k ++; }
             break;
       }
+
+      //Varies if conditions for unsafe working of worker.
+      if (k + 3 <= j) { safe = 1; }
+      else if (j == IMHT) {
+          safe = 1; }
+      else { safe = 0; }
   }
 
   printf( "\nOne processing round completed...\n" );
+  for (int i = 0; i < IMHT; i++) {
+      for (int j = 0; j < uintArrayWidth ; j++) {
+          printBinary(copyPart[j][i], 16);
+      }
+  }
 }
 
 uchar deadOrAlive(uchar state, uchar count) {
@@ -227,6 +242,7 @@ uchar deadOrAlive(uchar state, uchar count) {
     }
     return state;
 }
+
 
 uchar isTwoFiveFive(uchar input) {
     if (input == 255) {
@@ -265,11 +281,8 @@ void worker(chanend c_fromDist) {
                 }
             }
             results[j - 1] = deadOrAlive(state, count);
-            printf("- %d -", results[j - 1]);
         }
-        printf("\n");
         uint32_t output = bytesToBits(results, 30);
-        printBinary(output);
         c_fromDist <: output;
     }
 }
