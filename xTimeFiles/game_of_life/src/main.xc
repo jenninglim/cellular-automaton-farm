@@ -262,7 +262,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
             // Otherwise, continue processing the image.
             default:
-                while (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS IS PROCESSING A SPECIFIED NUMBER OF ROUNDS.
+                //while (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
                     // Alternate the separate green light on and off each round while processing rounds.
                     if (rounds % 2 == 0) {
                         c_toLEDs <: GRNS;
@@ -337,7 +337,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     }
                     current = getCurrentTime();
                     rounds++;
-                }  // END OF MAX_ROUNDS WHILE LOOP.
+                //}  // END OF MAX_ROUNDS WHILE LOOP.
                 break;
         }
     }
