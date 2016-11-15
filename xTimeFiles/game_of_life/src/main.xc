@@ -159,7 +159,6 @@ void DataInStream(char infname[], chanend c_out)
   printf( "DataInStream: Done...\n" );
   return;
 }
-
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Start your implementation by changing this function to implement the game of life
@@ -173,6 +172,20 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWork
   uint32_t copyPart[uintArrayWidth][IMHT];
 
   uchar safe = 0; // safe to send to workers
+
+  /*
+   * index[j][i] for the workers
+   * first column represents row sent
+   * second represent column sent
+   */
+  uchar index[NumberOfWorkers][2];
+
+  //initialise array
+  for (int i = 0; i < NumberOfWorkers; i ++) {
+      for (int j = 0; j < 2; j ++) {
+          index[i][j] = 0;
+      }
+  }
 
   uchar i = 0;  //index for the width of input array
   uchar j = 0;  //index for height of input array
@@ -191,24 +204,25 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWork
   //change the image according to the "Game of Life"
   while (turn) {
       if (k == IMHT) { turn = 0; } //ends turn
-      if (j == 2) { // starts to work the worker.
+      if (j == 3) { // starts to work the worker i.
           for (int x = 0; x < 3 ; x++) {
-              c_toWorker[0] <: linePart[i][j - x + IMHT % IMHT];
+              c_toWorker[0] <: linePart[0][j - 1 - x + IMHT % IMHT];
           }
           safe = 0;
       }
       select {
         //case when receiving from the (main distributor).
         case c_in :> linePart[i][j]:
+
             i = i + 1 % uintArrayWidth;
-            if (i % uintArrayWidth == 0) { j++; } //increment height when i goes over the "edge";
+            if (i == 0) { j++; } //increment height when i goes over the "edge";
             break;
         //when safe for worker to send back data.
         //case when receiving from the work.
         case safe => c_toWorker[0] :> uint32_t output:
-            copyPart[l][k % IMHT] = output;
+            copyPart[l][(k + 1) % IMHT] = output;
             for (int x = 0; x < 3 ; x++) {
-                c_toWorker[0] <: linePart[l][(k - x + 2 + IMHT) % IMHT];
+                c_toWorker[0] <: linePart[l][(k - x + 3 + IMHT) % IMHT];
             }
             l = l + 1 % uintArrayWidth;
             if (l == 0) { k ++; }
@@ -216,7 +230,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWork
       }
 
       //Varies if conditions for unsafe working of worker.
-      if (k + 3 <= j) { safe = 1; }
+      if (k + 3 <= j && j < IMHT) { safe = 1; }
       else if (j == IMHT) {
           safe = 1; }
       else { safe = 0; }
