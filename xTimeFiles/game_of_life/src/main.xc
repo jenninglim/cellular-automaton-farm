@@ -583,14 +583,16 @@ int main(void) {
         on tile[0]: buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
         on tile[0]: showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
 
-        on tile[1]: distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, WORKERS);  // Thread to coordinate work on image.
+        // Thread to coordinate work on image (image processes much faster if on same tile as workers).
+        on tile[1]: distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, WORKERS);
 
-        // SINGLE WORKER.
-        //on tile[1]: worker(c_workers[0], SINGLE);            // Thread to do work on an image.
+        /* SINGLE WORKER.
+        on tile[1]: worker(c_workers[0], SINGLE);              // Thread to do work on an image.
+        */
 
         /* 2 WORKERS.
-        on tile[1]: worker(c_workers[0], LEFT);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[1], RIGHT);             // Thread to do work on an image.
+        on tile[1]: worker(c_workers[0], LEFT);                // Thread to do work on an image.
+        on tile[1]: worker(c_workers[1], RIGHT);               // Thread to do work on an image.
         */
 
         /* 4 WORKERS. */
