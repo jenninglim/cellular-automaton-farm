@@ -1,7 +1,7 @@
 # Cellular-automaton-farm (geoByte implementation)
 **TODO**
 
-1. Make code work for 1, 2 and 4 workers.
+1. Create own PGM files.
 
 **NOTES**
 
