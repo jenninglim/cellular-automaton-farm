@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define IMHT 16    // Image height.
-#define IMWD 16    // Image width.
+#define IMHT 32    // Image height.
+#define IMWD 32    // Image width.
 
 #define MAX_ROUNDS 100  // Maxiumum number of rounds to be processed.
 
@@ -53,8 +53,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[] = "test.pgm";      // Input image path
-char outfname[] = "testout.pgm";  // Output image path
+char infname[] = "exploder32x32.pgm";      // Input image path
+char outfname[] = "exploderout.pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -198,7 +198,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
 
-    // Start up and wait for SW1 button press on the xCore-200 Explorer.
+    // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
     printf( "Waiting for SW1 button press...\n" );
     int initiated = 0;  // Whether processing has been initiated.
     while (!initiated) {
@@ -403,21 +403,24 @@ int aliveSurroundingCells(int x, int y, uchar image[IMWD/WORKERS + 2][IMHT]) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend c_fromDist, int workerType) {
-    // The segment of the image to be processed
-    // +2 extra columns for the boundary data.
-    uchar image[IMWD/WORKERS + 2][IMHT];
-    uchar pixel;
-    int segWD = IMWD/WORKERS + 2;  // The width of the segment.
+    uchar image[IMWD/WORKERS + 2][IMHT];  // The segment of the whole image that the worker will process.
+    uchar pixel;                          // A single pixel in the image.
+    int segWD = IMWD/WORKERS + 2;         // The width of the worker segment.
+
     while (1) {
+
+        // READ IN IMAGE SEGMENT FROM DISTRIBUTOR.
         // Worker that processes the image all on its own!
         if (workerType == SINGLE) {
             for (int y = 0; y < IMHT; y++) {
                 for (int x = 0; x < IMWD; x++) {
                     c_fromDist :> pixel;
                     image[x+1][y] = pixel;
+                    // First column also goes at the end.
                     if (x == 0) {
                         image[segWD - 1][y] = pixel;
                     }
+                    // Last column also goes at the start.
                     else if (x == IMWD-1) {
                         image[0][y] = pixel;
                     }
@@ -428,11 +431,13 @@ void worker(chanend c_fromDist, int workerType) {
         else if (workerType == LEFT) {
             for (int y = 0; y < IMHT; y++) {
                 for (int x = 0; x < segWD; x++) {
-                    if (x == segWD - 1) {  // Gets the last column (of the whole image) last; puts it in column 0.
+                    // Gets the last column (of the whole image) last; puts it in column 0.
+                    if (x == segWD - 1) {
                         c_fromDist :> image[0][y];
                     }
+                    // x+1 because the column 0 arrives last.
                     else {
-                        c_fromDist :> image[x+1][y];  // x+1 because the column 0 comes last.
+                        c_fromDist :> image[x+1][y];
                     }
                 }
             }
@@ -449,17 +454,19 @@ void worker(chanend c_fromDist, int workerType) {
         else if (workerType == RIGHT) {
             for (int y = 0; y < IMHT; y++) {
                 for (int x = 0; x < segWD; x++) {
-                    if (x == 0) {  // get the first column (of the whole image) first; puts it at the end.
+                    // get the first column (of the whole image) first; puts it at the end.
+                    if (x == 0) {
                         c_fromDist :> image[segWD - 1][y];
                     }
+                    // x-1 because the last column arrives first.
                     else {
-                        c_fromDist :> image[x-1][y];  // x-1 because the last column comes first.
+                        c_fromDist :> image[x-1][y];
                     }
                 }
             }
         }
 
-        // Workers analyse their segment for potential changes for the next round.
+        // ANALYSE IMAGE SEGMENT FOR POTENTIAL CHANGES FOR NEXT ROUND.
         for (int y = 0; y < IMHT; y++) {
             // Skip the first and last columns as they are boundaries provided for info only.
             for (int x = 1; x < (segWD - 1); x++) {
