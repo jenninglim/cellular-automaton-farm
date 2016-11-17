@@ -1,3 +1,0 @@
-<preCompilationAnalysis file="/Users/toddym42/Dev/Concurrent Computing/cellular-automaton-farm/xTimeFiles/lib_xassert/src/xassert.xc">
-<fDef name="xassert_msg" global="true" noreturn="false" doNotSpecialize="false" numParams="1"/>
-</preCompilationAnalysis>
