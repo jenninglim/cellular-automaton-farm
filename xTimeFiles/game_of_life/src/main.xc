@@ -7,8 +7,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define IMHT 32    // Image height.
-#define IMWD 32    // Image width.
+#define IMHT 16    // Image height.
+#define IMWD 16    // Image width.
 
 #define MAX_ROUNDS 100  // Maxiumum number of rounds to be processed.
 
@@ -53,8 +53,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[] = "exploder32x32.pgm";      // Input image path
-char outfname[] = "exploderout.pgm";  // Output image path
+char infname[] = "test.pgm";      // Input image path
+char outfname[] = "testout.pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -96,7 +96,7 @@ void buttonListener(in port b, chanend c_toDist) {
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-uchar DataInStream(char infname[], chanend c_out) {
+uchar DataInStream(chanend c_out) {
     int res;           // Result of reading in a PGM file.
     uchar line[IMWD];  // A line to be read in.
     printf( "DataInStream: Start...\n" );
@@ -226,6 +226,9 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
     double start = getCurrentTime();    // Start time of processing.
     double current = getCurrentTime();  // Time after processing a round.
 
+    //while (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
+    //}  // END OF MAX_ROUNDS WHILE LOOP.
+
     while (running) {
 
         select {
@@ -262,82 +265,69 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
             // Otherwise, continue processing the image.
             default:
-                //while (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
-                    // Alternate the separate green light on and off each round while processing rounds.
-                    if (rounds % 2 == 0) {
-                        c_toLEDs <: GRNS;
+
+                // Alternate the separate green light on and off each round while processing rounds.
+                if (rounds % 2 == 0) {
+                    c_toLEDs <: GRNS;
+                }
+                else {
+                    c_toLEDs <: OFF;
+                }
+
+                // 3 rows are sent to a worker at a time (FARMING PARALLELISM).
+                workerRow[WORKERS];  // The rows that the workers are currently analysing.
+
+                // SENDING THE INITIAL ROWS TO EACH WORKER.
+                int y;
+                int rowsSent = 0;
+                int w = 0;  // The worker.
+                for (y = 0; y < IMHT + 2; y++) {
+                    for (int x = 0; x < IMWD + 2; x++) {
+                        pixel = image[x + IMWD - 1 % IMWD][y + IMHT - 1 % IMHT];
+                        c_toWorker[w] <: pixel;
                     }
-                    else {
-                        c_toLEDs <: OFF;
+                    rowsSent++;
+                    if (rowsSent == 1) {
+                        workerRow[w] = y;
                     }
+                    if (rowsSent == 3) {
+                        if (y == IMHT + 1) break;  // If all rows sent
+                        y -= 2;
+                        w++;
+                        if (w = WORKERS) break;    // If initial rows sent to all workers.
+                        rowsSent = 0;              // Else carry on sending rows.
+                    }
+                }
 
-                    // SENDING THE IMAGE TO THE WORKERS.
-                    // The image is split vertically (GEOMETRIC PARALLELISM).
-                    for (int y = 0; y < IMHT; y++) {
-                        int fst = 0;  // Segment FIRST row counter.
-                        int lst = 1;  // Segment LAST row counter.
-
-                        for (int x = 0; x < IMWD; x++) {
-                            pixel = image[x][y];  // A single pixel in the image.
-
-                            // When only a single worker, send the pixels in sequence to the single worker.
-                            if (WORKERS == 1) {
-                                c_toWorker[0] <: pixel;
+                // RECEIVING UPDATES AND FARMING OUT MORE ROWS.
+                int rowsReceived = 0;  // Total number of rows completed by all workers.
+                while (rowsReceived < IMHT) {
+                    select {
+                        // Processed pixel received from worker i.
+                        case c_toWorker[int i] :> pixel:
+                            // Update the image with new pixel values.
+                            for (int x = 0; x < IMWD; x++) {
+                                image[x][workerRow[i]] = pixel;
                             }
-
-                            // When more than 1 worker, the boundaries between worker segments need sending to multiple workers.
-                            else {
-                                // First row of each worker segment.
-                                if (x % (IMWD / WORKERS) == 0) {
-                                    c_toWorker[((fst-1) + WORKERS) % WORKERS] <: pixel;
-                                    c_toWorker[( fst    + WORKERS) % WORKERS] <: pixel;
-                                    fst++;
-                                }
-                                // Last row of each worker segment.
-                                else if ((x+1) % (IMWD / WORKERS) == 0) {
-                                    c_toWorker[((lst-1) + WORKERS) % WORKERS] <: pixel;
-                                    c_toWorker[( lst    + WORKERS) % WORKERS] <: pixel;
-                                    lst++;
-                                }
-                                // Remainging non-boundary pixels then split between the workers.
-                                else {
-                                    for (int i = 0; i < WORKERS; i++) {
-                                        if (x < (i+1)*IMWD/WORKERS) {
-                                            c_toWorker[i] <: pixel;
-                                            break;
-                                        }
+                            rowsReceived++;
+                            // If there are rows still to complete, send more.
+                            if (rowsReceived < IMHT) {
+                                for (int y2 = 0; y2 < 3; y2++) {
+                                    for (int x = 0; x < IMWD + 2; x++) {
+                                        pixel = image[x + IMWD - 1 % IMWD][y + IMHT - 1 % IMHT];
+                                        c_toWorker[i] <: pixel;
                                     }
+                                    if (y2 == 0) {
+                                        workerRow[i] = y;
+                                    }
+                                    y++;
                                 }
+                                y -= 2;
                             }
-                        }
                     }
-
-                    // RECEIVING UPDATES FROM THE WORKERS.
-                    int x[WORKERS];  // Each workers x coordinate to update in the new image.
-                    int y[WORKERS];  // Each workers y coordinate to update in the new image.
-                    for (int i = 0; i < WORKERS; i++) {
-                        x[i] = i*IMWD/WORKERS;
-                        y[i] = 0;
-                    }
-
-                    int workerRows = 0;  // Total number of rows completed by all workers.
-                    while (workerRows < WORKERS * IMHT) {
-                        select {
-                            // Processed pixel received from worker i.
-                            case c_toWorker[int i] :> pixel:
-                                image[x[i]][y[i]] = pixel;
-                                x[i]++;
-                                if (x[i] == (i+1)*IMWD/WORKERS) {
-                                    x[i] = i*IMWD/WORKERS;
-                                    y[i]++;
-                                    workerRows++;
-                                }
-                                break;
-                        }
-                    }
-                    current = getCurrentTime();
-                    rounds++;
-                //}  // END OF MAX_ROUNDS WHILE LOOP.
+                }
+                current = getCurrentTime();
+                rounds++;
                 break;
         }
     }
@@ -490,7 +480,7 @@ void worker(chanend c_fromDist, int workerType) {
 // Write pixel stream from channel c_in to PGM image file
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataOutStream(char outfname[], chanend c_in) {
+void DataOutStream(chanend c_in) {
     int res;
     uchar line[IMWD];
 
@@ -583,8 +573,8 @@ int main(void) {
 
     par {
         on tile[0]: orientation(i2c[0],c_control);             // Client thread reading orientation data.
-        on tile[0]: DataInStream(infname, c_inIO);             // Thread to read in a PGM image.
-        on tile[0]: DataOutStream(outfname, c_outIO);          // Thread to write out a PGM image.
+        on tile[0]: DataInStream(c_inIO);             // Thread to read in a PGM image.
+        on tile[0]: DataOutStream(c_outIO);          // Thread to write out a PGM image.
         // Only work on tile[0].
         on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);      // Server thread providing orientation data.
         on tile[0]: buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
