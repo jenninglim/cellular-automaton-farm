@@ -13,9 +13,23 @@
 #define NumberOfWorkers 1         //number of workers
 #define uintArrayWidth 1             //ceil(IMWD - 1 / 31) + 1
 
-typedef unsigned char uchar;      //using uchar as shorthand
+// Port to access xCORE-200 buttons.
+in port buttons = XS1_PORT_4E;
+// Buttons signals.
+#define SW2 13     // SW2 button signal.
+#define SW1 14     // SW1 button signal.
 
-port p_scl = XS1_PORT_1E;         //interface ports to orientation
+// Port to access xCore-200 LEDs.
+out port leds = XS1_PORT_4F;
+// LED signals.
+#define OFF  0     // Signal to turn the LED off.
+#define GRNS 1     // Signal to turn the separate green LED on.
+#define BLU  2     // Signal to turn the blue LED on.
+#define GRN  4     // Signal to turn the green LED on.
+#define RED  8     // Signal to turn the red LED on.
+
+// Interface ports to orientation
+port p_scl = XS1_PORT_1E;
 port p_sda = XS1_PORT_1F;
 
 #define FXOS8700EQ_I2C_ADDR 0x1E  //register addresses for orientation
@@ -28,6 +42,44 @@ port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Y_LSB 0x4
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
+
+typedef unsigned char uchar;      //using uchar as shorthand
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// DISPLAYS an LED pattern
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+int showLEDs(out port p, chanend fromDist) {
+    int pattern; // 1st bit (1) ...separate green LED
+               // 2nd bit (2) ...blue LED
+               // 3rd bit (4) ...green LED
+               // 4th bit (8) ...red LED
+    while (1) {
+        fromDist :> pattern;   // Receive new pattern from distributor.
+        p <: pattern;          // Send pattern to LED port.
+    }
+    return 0;
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// READ BUTTONS and send button pattern to distributor.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+void buttonListener(in port b, chanend c_toDist) {
+    int r;  // Received button signal.
+    while (1) {
+        b when pinseq(15)  :> r;     // Check that no button is pressed.
+        b when pinsneq(15) :> r;     // Check if some buttons are pressed.
+        if (r == SW1 || r == SW2) {  // If either button is pressed
+            c_toDist <: r;           // send button pattern to distributor.
+        }
+    }
+}
+
 
 //Returns a bit in a unint32_t integer
 uchar returnBitInt(uint32_t queriedInt, uchar index) {
@@ -157,6 +209,7 @@ void DataInStream(char infname[], chanend c_out)
   //Close PGM image file
   _closeinpgm();
   printf( "DataInStream: Done...\n" );
+
   return;
 }
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -166,10 +219,11 @@ void DataInStream(char infname[], chanend c_out)
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWorker[n], unsigned n)
+void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWorker[n], unsigned n)
 {
   uint32_t linePart[uintArrayWidth][IMHT];
   uint32_t copyPart[uintArrayWidth][IMHT];
+  int buttonPressed;  // The button pressed on the xCore-200 Explorer.
 
   uchar safe = 0; // safe to send to workers
 
@@ -196,8 +250,18 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWork
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
-  printf( "Waiting for Board Tilt...\n" );
-  fromAcc :> int value;
+
+  // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
+  printf( "Waiting for SW1 button press...\n" );
+  int initiated = 0;  // Whether processing has been initiated.
+
+  while (!initiated) {
+      c_fromButtons :> buttonPressed;
+      if (buttonPressed == SW1) {
+          initiated = 1;
+      }
+  }
+  c_toLEDs <: GRN;  // Turn ON the green LED to indicate reading of the image has STARTED.
 
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
@@ -235,6 +299,8 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWork
           safe = 1; }
       else { safe = 0; }
   }
+
+  c_toLEDs <: OFF;  // Turn OFF the green LED to indicate reading of the image has FINISHED.
 
   printf( "\nOne processing round completed...\n" );
   for (int i = 0; i < IMHT; i++) {
@@ -340,41 +406,50 @@ void DataOutStream(char outfname[], chanend c_in)
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void orientation( client interface i2c_master_if i2c, chanend toDist) {
-  i2c_regop_res_t result;
-  char status_data = 0;
-  int tilted = 0;
+    i2c_regop_res_t result;
+    char status_data = 0;
+    int vertical = 0;
 
-  // Configure FXOS8700EQ
-  result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_XYZ_DATA_CFG_REG, 0x01);
-  if (result != I2C_REGOP_SUCCESS) {
-    printf("I2C write reg failed\n");
-  }
-
-  // Enable FXOS8700EQ
-  result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_CTRL_REG_1, 0x01);
-  if (result != I2C_REGOP_SUCCESS) {
-    printf("I2C write reg failed\n");
-  }
-
-  //Probe the orientation x-axis forever
-  while (1) {
-
-    //check until new orientation data is available
-    do {
-      status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
-    } while (!status_data & 0x08);
-
-    //get new x-axis tilt value
-    int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
-
-    //send signal to distributor after first tilt
-    if (!tilted) {
-      if (x>30) {
-        tilted = 1 - tilted;
-        toDist <: 1;
-      }
+    // Configure FXOS8700EQ.
+    result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_XYZ_DATA_CFG_REG, 0x01);
+    if (result != I2C_REGOP_SUCCESS) {
+        printf("I2C write reg failed\n");
     }
-  }
+
+    // Enable FXOS8700EQ.
+    result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_CTRL_REG_1, 0x01);
+    if (result != I2C_REGOP_SUCCESS) {
+        printf("I2C write reg failed\n");
+    }
+
+    // Probe the orientation x-axis forever and inform the distributor of orientation changes.
+    while (1) {
+        // Check until new orientation data is available.
+        do {
+            status_data = i2c.read_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_DR_STATUS, result);
+        } while (!status_data & 0x08);
+
+        // Get new x-axis tilt value.
+        int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
+
+        // If previously horizontal
+        if (!vertical) {
+            // If now vertical, tell the distributor.
+            if (x >= 125) {
+                vertical = 1;
+                toDist <: 1;
+            }
+        }
+        // If previously vertical
+        else {
+            // If now horizontal, tell the distributor.
+            if (x == 0) {
+                vertical = 0;
+                toDist <: 1;
+            }
+        }
+    }
+
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -390,15 +465,19 @@ i2c_master_if i2c[1];               //interface to orientation
 char infname[] = "test.pgm";     //put your input image path here
 char outfname[] = "testout.pgm"; //put your output image path here
 chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
-chan c_workers[NumberOfWorkers];
+chan c_workers[NumberOfWorkers];     // Worker channels (one for each worker).
+chan c_buttonsToDist, c_DistToLEDs;  // Button and LED channels.
 
 par {
     i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
     orientation(i2c[0],c_control);        //client thread reading orientation data
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control, c_workers, NumberOfWorkers);//thread to coordinate work on image
+    distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, NumberOfWorkers);//thread to coordinate work on image
     worker(c_workers[0]);                  // thread to do work on an image.
+
+    buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
+    showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
   }
 
   return 0;
