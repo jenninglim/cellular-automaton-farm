@@ -151,15 +151,29 @@ uint32_t compress(uchar array[], uchar length) {
     return val;
 }
 
-uint32_t assignEdges(uint32_t left, uint32_t middle,uchar midLength, uint32_t right) {
+uint32_t assignLeftEdge(uint32_t left, uint32_t middle) {
     uint32_t val = middle;
     if (returnBitInt(left,31) == 255) {
         val = val | 0x00000001 << 31;
     }
+    return val;
+}
+
+uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
+    uint32_t val = middle;
     if (returnBitInt(right,1) == 255) {
         val = val | 0x00000001 << (31 - midLength);
         val = val | 0x00000001;
     }
+    return val;
+}
+/*
+ *
+ */
+uint32_t assignEdges(uint32_t left, uint32_t middle,uchar midLength, uint32_t right) {
+    uint32_t val = middle;
+    val = assignLeftEdge(left,middle);
+    val = assignRightEdge(middle, midLength, right);
     return val;
 }
 
