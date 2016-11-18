@@ -10,8 +10,9 @@
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
-#define NumberOfWorkers 1         //number of workers
+#define NUMBEROFWORKERS 1         //number of workers
 #define uintArrayWidth 1             //ceil(IMWD - 1 / 31) + 1
+#define NUMBEROFSUBDIST 2   //number of subdistributors.
 
 // Port to access xCORE-200 buttons.
 in port buttons = XS1_PORT_4E;
@@ -226,6 +227,41 @@ void DataInStream(char infname[], chanend c_out)
 
   return;
 }
+
+void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[NUMBEROFSUBDIST]) {
+    //various variables to control the state of the same.
+    uchar pause = 0;
+    uchar end = 0;
+
+    int buttonPressed;  // The button pressed on the xCore-200 Explorer.
+    // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
+    printf( "Waiting for SW1 button press...\n" );
+    int initiated = 0;  // Whether processing has been initiated.
+
+    while (!initiated) {
+        c_fromButtons :> buttonPressed;
+        if (buttonPressed == SW1) {
+            initiated = 1;
+        }
+    }
+    //Distributing image from c_in
+    while (1) {
+        select {
+            case c_fromButtons :> buttonPressed: //export state
+                if (buttonPressed == SW2) { //Export state.
+                    end = 1;
+                }
+                break;
+            case fromAcc :> pause:
+                //Send signal to distributor.
+                break;
+           // case (pause == 0) =>
+
+        }
+    }
+    c_toLEDs <: OFF;  // Turn OFF the green LED to indicate reading of the image has FINISHED.
+    c_toLEDs <: GRN;  // Turn ON the green LED to indicate reading of the image has STARTED.
+}
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Start your implementation by changing this function to implement the game of life
@@ -233,23 +269,25 @@ void DataInStream(char infname[], chanend c_out)
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend c_out, chanend fromAcc,  chanend c_toWorker[n], unsigned n)
+void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 {
   uint32_t linePart[uintArrayWidth][IMHT];
   uint32_t copyPart[uintArrayWidth][IMHT];
-  int buttonPressed;  // The button pressed on the xCore-200 Explorer.
 
   uchar safe = 0; // safe to send to workers
+  uchar turn = 1; // turn number
+  uchar pause = 0;
+  uchar readIn = 1;
 
   /*
    * index[j][i] for the workers
    * first column represents row sent
    * second represent column sent
    */
-  uchar index[NumberOfWorkers][2];
+  uchar index[NUMBEROFWORKERS][2];
 
   //initialise array
-  for (int i = 0; i < NumberOfWorkers; i ++) {
+  for (int i = 0; i < NUMBEROFWORKERS; i ++) {
       for (int j = 0; j < 2; j ++) {
           index[i][j] = 0;
       }
@@ -260,28 +298,15 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
   uchar k = 0; //number of rows sent.
   uchar l = 0; //number of columns sent.
-  uchar turn = 1; // turn number
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
 
-  // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
-  printf( "Waiting for SW1 button press...\n" );
-  int initiated = 0;  // Whether processing has been initiated.
-
-  while (!initiated) {
-      c_fromButtons :> buttonPressed;
-      if (buttonPressed == SW1) {
-          initiated = 1;
-      }
-  }
-  c_toLEDs <: GRN;  // Turn ON the green LED to indicate reading of the image has STARTED.
-
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
-  while (turn) {
-      if (k == IMHT) { turn = 0; } //ends turn
+  while (1) {
+      if (k == IMHT) { turn++ ; } //increment turn
       if (j == 3) { // starts to work the worker i.
           for (int x = 0; x < 3 ; x++) {
               c_toWorker[0] <: linePart[0][j - 1 - x + IMHT % IMHT];
@@ -290,14 +315,14 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
       }
       select {
         //case when receiving from the (main distributor).
-        case c_in :> linePart[i][j]:
-
+        case readIn => c_in :> linePart[i][j]:
+            if (j == IMHT) { readIn = 0; }
             i = i + 1 % uintArrayWidth;
             if (i == 0) { j++; } //increment height when i goes over the "edge";
             break;
         //when safe for worker to send back data.
         //case when receiving from the work.
-        case safe => c_toWorker[0] :> uint32_t output:
+        case (safe) => c_toWorker[0] :> uint32_t output:
             copyPart[l][(k + 1) % IMHT] = output;
             for (int x = 0; x < 3 ; x++) {
                 c_toWorker[0] <: linePart[l][(k - x + 3 + IMHT) % IMHT];
@@ -313,8 +338,6 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
           safe = 1; }
       else { safe = 0; }
   }
-
-  c_toLEDs <: OFF;  // Turn OFF the green LED to indicate reading of the image has FINISHED.
 
   printf( "\nOne processing round completed...\n" );
   for (int i = 0; i < IMHT; i++) {
@@ -479,15 +502,19 @@ i2c_master_if i2c[1];               //interface to orientation
 char infname[] = "test.pgm";     //put your input image path here
 char outfname[] = "testout.pgm"; //put your output image path here
 chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
-chan c_workers[NumberOfWorkers];     // Worker channels (one for each worker).
+chan c_workers[NUMBEROFWORKERS];     // Worker channels (one for each worker).
+chan c_OtherWorkers[NUMBEROFWORKERS];
 chan c_buttonsToDist, c_DistToLEDs;  // Button and LED channels.
+chan c_subDist[NUMBEROFSUBDIST];
 
 par {
     i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
     orientation(i2c[0],c_control);        //client thread reading orientation data
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, NumberOfWorkers);//thread to coordinate work on image
+    mainDistributor(c_buttonsToDist, c_DistToLEDs , c_control, c_inIO, c_outIO, c_subDist);
+    subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);//thread to coordinate work on image
+    subDistributor(c_subDist[1], c_OtherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
     worker(c_workers[0]);                  // thread to do work on an image.
 
     buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
