@@ -11,7 +11,7 @@
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
 #define NUMBEROFWORKERS 1         //number of workers
-#define uintArrayWidth 1             //ceil(IMWD - 1 / 31) + 1
+#define UINTARRAYWIDTH 1             //ceil(IMWD - 1 / 31) + 1
 #define NUMBEROFSUBDIST 2   //number of subdistributors.
 
 // Port to access xCORE-200 buttons.
@@ -152,6 +152,9 @@ uint32_t compress(uchar array[], uchar length) {
     return val;
 }
 
+/*
+ * assignLeftEdge assumes that left is already in the correct form).
+ */
 uint32_t assignLeftEdge(uint32_t left, uint32_t middle) {
     uint32_t val = middle;
     if (returnBitInt(left,31) == 255) {
@@ -159,7 +162,9 @@ uint32_t assignLeftEdge(uint32_t left, uint32_t middle) {
     }
     return val;
 }
-
+/*
+ * right does not have to be of correct form.
+ */
 uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
     uint32_t val = middle;
     if (returnBitInt(right,1) == 255) {
@@ -173,8 +178,8 @@ uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
  */
 uint32_t assignEdges(uint32_t left, uint32_t middle,uchar midLength, uint32_t right) {
     uint32_t val = middle;
+    val = assignRightEdge(middle, midLength, right); //assign left depends on assign right.
     val = assignLeftEdge(left,middle);
-    val = assignRightEdge(middle, midLength, right);
     return val;
 }
 
@@ -187,7 +192,7 @@ void DataInStream(char infname[], chanend c_out)
 {
   int res;
   uchar line[30];
-  uint32_t row[uintArrayWidth];
+  uint32_t row[UINTARRAYWIDTH];
   uchar length = 0;
   printf( "DataInStream: Start...\n" );
 
@@ -201,7 +206,7 @@ void DataInStream(char infname[], chanend c_out)
   for( int y = 0; y < IMHT; y++ ) {
       length = 30;
       //reads in a single row
-      for (int i = 0; i < uintArrayWidth; i++ ) {
+      for (int i = 0; i < UINTARRAYWIDTH; i++ ) {
           if (i == ceil(IMWD / 30)) {
               length = IMWD % 30;
           }
@@ -210,12 +215,12 @@ void DataInStream(char infname[], chanend c_out)
 
       }
       //assign edges to rows
-      for (int i = 0; i < uintArrayWidth; i++ ) {
+      for (int i = 0; i < UINTARRAYWIDTH; i++ ) {
           length = 30;
           if (i == ceil(IMWD / 30)) {
               length = IMWD % 30;
           }
-          row[i] = assignEdges(row[(i-1+uintArrayWidth) % uintArrayWidth], row[i],length, row[ (i + 1) %uintArrayWidth]);
+          row[i] = assignEdges(row[(i-1+UINTARRAYWIDTH) % UINTARRAYWIDTH], row[i],length, row[ (i + 1) %UINTARRAYWIDTH]);
           c_out <: row[i];
       }
 
@@ -228,10 +233,16 @@ void DataInStream(char infname[], chanend c_out)
   return;
 }
 
-void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[NUMBEROFSUBDIST]) {
+void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
     uchar pause = 0;
+    uchar aliveCells = 0;
+    uchar rightDone = 0;
+    uchar leftDone = 0;
     uchar end = 0;
+    uchar length = 0;
+    uint32_t val;
+    uint32_t edges[4];
 
     int buttonPressed;  // The button pressed on the xCore-200 Explorer.
     // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
@@ -244,18 +255,78 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
             initiated = 1;
         }
     }
-    //Distributing image from c_in
+    //Distributing image from c_in to sub distributors.
+    for( int i = 0; i < IMHT; i++ ) {
+        length = 30;
+        for (int j = 0; j < UINTARRAYWIDTH; j++) {
+            c_in :> val;
+            if (j < UINTARRAYWIDTH / 2) {
+                c_subDist[0] <: val;
+            } else {
+                c_subDist[1] <: val;
+            }
+        }
+    }
+
+    length = IMWD % 30;
     while (1) {
         select {
             case c_fromButtons :> buttonPressed: //export state
                 if (buttonPressed == SW2) { //Export state.
                     end = 1;
                 }
+                //recieve data from distributors
                 break;
             case fromAcc :> pause:
                 //Send signal to distributor.
                 break;
-           // case (pause == 0) =>
+            case (pause != 0) => c_subDist[int i] :> uint32_t val:
+                if (rightDone + leftDone == 0) { //reset alive cells at the end of each round.
+                    aliveCells = 0;
+                    for (int i = 0; i < 4; i++) { //initialise edges.
+                        edges[i] = 0;
+                    }
+                }
+                if (i == 0) { //right most  distributor is ready.
+                    rightDone = 1;
+                    c_subDist[i] :> val;
+                    aliveCells = aliveCells + val;
+                }
+                else { //left most  distributor is ready.
+                    leftDone = 1;
+                    c_subDist[i] :> val;
+                    aliveCells = aliveCells + val;
+                }
+                if (rightDone + leftDone == 2) { //assign edges when both sub distributors are ready.
+                    for (int i = 0; i < IMHT; i ++ ){
+                        for (int j = 0; j < 4; j++ ) {// receiving edges
+                            select {
+                                case c_subDist[int l] :> uint32_t edge:
+                                    uchar k = 0;
+                                    uchar m = 2;
+                                    if (l == 0) {
+                                        edges[k] = edge;
+                                        k ++;
+                                    } else {
+                                        edges[m] = edge;
+                                        m ++;
+                                    }
+                                    break;
+                            }
+
+                        }
+                        edges[3] = assignRightEdge(edges[3],length, edges[0]);
+                        edges[0] = assignLeftEdge(edges[3], edges[0]);
+                        edges[1] = assignRightEdge(edges[1], 30, edges[2]);
+                        edges[2] = assignLeftEdge(edges[1], edges[2]);
+                        for (int j = 0; j < 2; j ++) {
+                            c_subDist[0] <: edges[j];
+                            c_subDist[0] <: edges[j+2];
+                        }
+                    }
+                }
+
+                break;
 
         }
     }
@@ -271,18 +342,19 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
 /////////////////////////////////////////////////////////////////////////////////////////
 void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 {
-  uint32_t linePart[uintArrayWidth][IMHT];
-  uint32_t copyPart[uintArrayWidth][IMHT];
+  uint32_t linePart[UINTARRAYWIDTH][IMHT];
+  uint32_t copyPart[UINTARRAYWIDTH][IMHT];
 
   uchar safe = 0; // safe to send to workers
   uchar turn = 1; // turn number
-  uchar pause = 0;
-  uchar readIn = 1;
+  uchar pause = 0; // boolean for pause state
+  uchar readIn = 1; //boolean for reading in files.
+  uchar nextTurn = 0; //boolean for next Turn
 
   /*
    * index[j][i] for the workers
-   * first column represents row sent
-   * second represent column sent
+   * first column represents cols sent
+   * second represent rows sent
    */
   uchar index[NUMBEROFWORKERS][2];
 
@@ -293,11 +365,14 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
   }
 
-  uchar i = 0;  //index for the width of input array
-  uchar j = 0;  //index for height of input array
+  uchar colsReceived = 0;   //index for the width of input array i
+  uchar rowsReceived = 0;  //index for the height of input array j
 
-  uchar k = 0; //number of rows sent.
-  uchar l = 0; //number of columns sent.
+  uchar colsSent = 0; //number of columns sent. l
+  uchar rowsSent = 0; //number of rows sent. k
+
+  uchar workersStarted = 0;
+
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
@@ -306,42 +381,81 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (1) {
-      if (k == IMHT) { turn++ ; } //increment turn
-      if (j == 3) { // starts to work the worker i.
+      if (rowsSent == IMHT) { nextTurn = 1; turn ++; } //increment turn
+      if (rowsReceived == IMHT) { readIn = 0; }
+      // starts to work the workers.
+      if (safe && workersStarted < NUMBEROFWORKERS) {
           for (int x = 0; x < 3 ; x++) {
-              c_toWorker[0] <: linePart[0][j - 1 - x + IMHT % IMHT];
+              c_toWorker[workersStarted] <: linePart[colsSent][rowsSent - 1 + x + IMHT % IMHT];
           }
-          safe = 0;
+          colsSent ++;
+          rowsSent ++;
+          index[workersStarted][0] = colsSent % UINTARRAYWIDTH;
+          index[workersStarted][1] = rowsSent;
+          workersStarted ++;
       }
       select {
         //case when receiving from the (main distributor).
-        case readIn => c_in :> linePart[i][j]:
-            if (j == IMHT) { readIn = 0; }
-            i = i + 1 % uintArrayWidth;
-            if (i == 0) { j++; } //increment height when i goes over the "edge";
+        case readIn => c_in :> linePart[(colsReceived + 1) % UINTARRAYWIDTH][rowsReceived]:
+            colsReceived ++;
+            if ((colsReceived + 1) % UINTARRAYWIDTH) { rowsReceived ++; } //increment height when i goes over the "edge";
+            if (rowsReceived == IMHT && colsReceived == IMHT * UINTARRAYWIDTH) {
+                readIn = 0; //finished readIn.
+            }
             break;
         //when safe for worker to send back data.
         //case when receiving from the work.
-        case (safe) => c_toWorker[0] :> uint32_t output:
-            copyPart[l][(k + 1) % IMHT] = output;
-            for (int x = 0; x < 3 ; x++) {
-                c_toWorker[0] <: linePart[l][(k - x + 3 + IMHT) % IMHT];
+        case (safe) => c_toWorker[int i] :> uint32_t output:
+            //copyPart[l][(k + 1) % IMHT] = output;
+            if (nextTurn == 0) {
+                for (int x = 0; x < 3 ; x++) {
+                    c_toWorker[i] <: linePart[(index[i][0])][(index[i][1])];
+                }
+                index[i][0] = colsSent % UINTARRAYWIDTH;
+                index[i][1] = rowsSent;
+                colsSent ++;
+                if ((colsSent + 1) % UINTARRAYWIDTH == 0) { rowsSent ++; }
+                if (rowsSent == IMHT && colsSent == IMHT * UINTARRAYWIDTH) {
+                    nextTurn = 1; //finished readIn.
+                }
             }
-            l = l + 1 % uintArrayWidth;
-            if (l == 0) { k ++; }
             break;
+        default:
+
+            if (nextTurn) {
+                c_in <: 1; //signalling done...
+                //logic for sending edges
+                for (int i = 0; i < IMHT; i++){
+                    for (int j = 0; j < UINTARRAYWIDTH; j++) {
+                        if ( j  < UINTARRAYWIDTH - 1) {
+                            linePart[j][i] = assignRightEdge(linePart[j][i],30,linePart[j + 1][i]);
+                        }
+                        if (j > 0 ) {
+                            linePart[j][i] = assignLeftEdge(linePart[j - 1][i], linePart[j][i]);
+                        }
+
+                    }
+                    c_in <: linePart[0][i];
+                    c_in <: linePart[UINTARRAYWIDTH - 1][i];
+                    c_in :>linePart[0][i];
+                    c_in :> linePart[UINTARRAYWIDTH - 1][i];
+                }
+             }
+
+            break;
+
       }
 
       //Varies if conditions for unsafe working of worker.
-      if (k + 3 <= j && j < IMHT) { safe = 1; }
-      else if (j == IMHT) {
+      if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
+      else if (rowsReceived == IMHT) {
           safe = 1; }
       else { safe = 0; }
   }
 
   printf( "\nOne processing round completed...\n" );
   for (int i = 0; i < IMHT; i++) {
-      for (int j = 0; j < uintArrayWidth ; j++) {
+      for (int j = 0; j < UINTARRAYWIDTH ; j++) {
           printBinary(copyPart[j][i], 16);
       }
   }
@@ -503,7 +617,7 @@ char infname[] = "test.pgm";     //put your input image path here
 char outfname[] = "testout.pgm"; //put your output image path here
 chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
 chan c_workers[NUMBEROFWORKERS];     // Worker channels (one for each worker).
-chan c_OtherWorkers[NUMBEROFWORKERS];
+chan c_otherWorkers[NUMBEROFWORKERS];
 chan c_buttonsToDist, c_DistToLEDs;  // Button and LED channels.
 chan c_subDist[NUMBEROFSUBDIST];
 
@@ -512,10 +626,14 @@ par {
     orientation(i2c[0],c_control);        //client thread reading orientation data
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    mainDistributor(c_buttonsToDist, c_DistToLEDs , c_control, c_inIO, c_outIO, c_subDist);
+    mainDistributor(c_buttonsToDist, c_DistToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);
     subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);//thread to coordinate work on image
-    subDistributor(c_subDist[1], c_OtherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
-    worker(c_workers[0]);                  // thread to do work on an image.
+    subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
+    par (int i = 0; i < NUMBEROFWORKERS; i++){ //making workers
+        worker(c_workers[i]);                  // thread to do work on an image.
+        worker(c_otherWorkers[i]);
+
+    }
 
     buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
     showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
