@@ -7,10 +7,10 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define IMHT 32    // Image height.
-#define IMWD 32    // Image width.
+#define IMHT 64    // Image height.
+#define IMWD 64    // Image width.
 
-#define MAX_ROUNDS 100  // Maxiumum number of rounds to be processed.
+#define MAX_ROUNDS 1  // Maxiumum number of rounds to be processed.
 
 #define WORKERS 4  // Total number of workers processing the image.
 
@@ -53,8 +53,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[] = "exploder32x32.pgm";      // Input image path
-char outfname[] = "exploderout.pgm";  // Output image path
+char infname[] = "64x64.pgm";      // Input image path
+char outfname[] = "64x64out.pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -111,12 +111,12 @@ uchar DataInStream(char infname[], chanend c_out) {
     // Read image line-by-line and send byte by byte to channel c_out.
     for (int y = 0; y < IMHT; y++) {
         _readinline(line, IMWD);
-        printf("[%2.1d]", y);
+        //printf("[%2.1d]", y);
         for (int x = 0; x < IMWD; x++) {
             c_out <: line[x];
-            printf("-%4.1d ", line[x]);
+            //printf("-%4.1d ", line[x]);
         }
-        printf("\n");
+        //printf("\n");
     }
 
     // Close PGM image file.
@@ -210,7 +210,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
     // Read in the image from DataInStream.
     printf( "Populating image array...\n" );
-    printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
+    //printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
     c_toLEDs <: GRN;  // Turn ON the green LED to indicate reading of the image has STARTED.
     for (int y = 0; y < IMHT; y++) {
         for (int x = 0; x < IMWD; x++ ) {
@@ -234,14 +234,14 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                 if (buttonPressed == SW2) {
                     c_toLEDs <: BLU;  // Turn ON the blue LED to indicate export of the image has STARTED.
                     printStatusReport(start, current, rounds, image, 1);
-                    printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
+                    //printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
                     for (int y = 0; y < IMHT; y++) {
-                        printf("[%2.1d]", y);
+                        //printf("[%2.1d]", y);
                         for (int x = 0; x < IMWD; x++) {
                             c_out <: image[x][y];
-                            printf( "-%4.1d ", image[x][y]);
+                            //printf( "-%4.1d ", image[x][y]);
                         }
-                        printf("\n");
+                        //printf("\n");
                     }
                     c_toLEDs <: OFF;  // Turn OFF the blue LED to indicate export of the image has FINISHED.
                     running = 0;
@@ -262,7 +262,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
             // Otherwise, continue processing the image.
             default:
-                //while (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
+                if (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
                     // Alternate the separate green light on and off each round while processing rounds.
                     if (rounds % 2 == 0) {
                         c_toLEDs <: GRNS;
@@ -337,7 +337,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     }
                     current = getCurrentTime();
                     rounds++;
-                //}  // END OF MAX_ROUNDS WHILE LOOP.
+                }  // END OF MAX_ROUNDS IF STATEMENT.
                 break;
         }
     }
@@ -593,32 +593,18 @@ int main(void) {
         // Thread to coordinate work on image (image processes much faster if on same tile as workers).
         on tile[1]: distributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_workers, WORKERS);
 
-        /* SINGLE WORKER.
-        on tile[1]: worker(c_workers[0], SINGLE);              // Thread to do work on an image.
-        */
+        // Worker threads that do work on an image.
 
-        /* 2 WORKERS.
-        on tile[1]: worker(c_workers[0], LEFT);                // Thread to do work on an image.
-        on tile[1]: worker(c_workers[1], RIGHT);               // Thread to do work on an image.
-        */
+        // SINGLE WORKER.
+        //on tile[1]: worker(c_workers[0], SINGLE);
 
-        /* 4 WORKERS. */
-        on tile[1]: worker(c_workers[0], LEFT);                // Thread to do work on an image.
-        on tile[1]: worker(c_workers[1], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[2], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[3], RIGHT);               // Thread to do work on an image.
+        // MULTIPLE WORKERS
+        on tile[1]: worker(c_workers[0], LEFT);
+            par (int i = 1; i < WORKERS-1; i++) {
+                on tile[1]: worker(c_workers[i], CENTRE);
+            }
+        on tile[1]: worker(c_workers[WORKERS-1], RIGHT);
 
-
-        /* 8 WORKERS.
-        on tile[1]: worker(c_workers[0], LEFT);                // Thread to do work on an image.
-        on tile[1]: worker(c_workers[1], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[2], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[3], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[4], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[5], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[6], CENTRE);              // Thread to do work on an image.
-        on tile[1]: worker(c_workers[7], RIGHT);               // Thread to do work on an image.
-        */
     }
 
   return 0;
