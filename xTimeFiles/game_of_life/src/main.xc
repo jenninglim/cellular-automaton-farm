@@ -287,58 +287,81 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 if (buttonPressed == SW2) { //Export state.
                     end = 1;
                 }
+                else if (buttonPressed == SW1) {
+                    pause = pause + 1 % 2;
+                }
                 //recieve data from distributors
                 break;
             case fromAcc :> pause:
                 //Send signal to distributor.
                 break;
-            case (pause != 0) => c_subDist[int i] :> uint32_t val:
-                if (rightDone + leftDone == 0) { //reset alive cells at the end of each round.
-                    aliveCells = 0;
-                    for (int i = 0; i < 4; i++) { //initialise edges.
+            case c_subDist[int i] :> val:
+
+                //tells subDistributors to pause (or not).
+                aliveCells = aliveCells + val;
+                if (pause == 0) { c_subDist[i] <: 1; }// change this from to 1 (for debug)
+                else if (pause == 1) { c_subDist[i] <: 1; }
+                if (i == 0) { //leftmost subDist is ready.
+                    leftDone = 1;
+                } else { //rightmost subDist is ready.
+                    rightDone = 1;
+                }
+
+                if (rightDone + leftDone == 0) {
+                    aliveCells = 0; //reset alive cells at the end of each round.
+                    for (int i = 0; i < 4; i++) { //initialise edges to 0.
                         edges[i] = 0;
                     }
                 }
-                if (i == 0) { //right most  distributor is ready.
-                    rightDone = 1;
-                    c_subDist[i] :> val;
-                    aliveCells = aliveCells + val;
-                }
-                else { //left most  distributor is ready.
-                    leftDone = 1;
-                    c_subDist[i] :> val;
-                    aliveCells = aliveCells + val;
-                }
-                if (rightDone + leftDone == 2) { //assign edges when both sub distributors are ready.
-                    for (int i = 0; i < IMHT; i ++ ){
-                        for (int j = 0; j < 4; j++ ) {// receiving edges
-                            select {
-                                case c_subDist[int l] :> uint32_t edge:
-                                    uchar k = 0;
-                                    uchar m = 2;
-                                    if (l == 0) {
-                                        edges[k] = edge;
-                                        k ++;
-                                    } else {
-                                        edges[m] = edge;
-                                        m ++;
-                                    }
-                                    break;
-                            }
 
-                        }
-                        edges[3] = assignRightEdge(edges[3],length, edges[0]);
-                        edges[0] = assignLeftEdge(edges[3], edges[0]);
-                        edges[1] = assignRightEdge(edges[1], 30, edges[2]);
-                        edges[2] = assignLeftEdge(edges[1], edges[2]);
-                        for (int j = 0; j < 2; j ++) {
-                            c_subDist[0] <: edges[j];
-                            c_subDist[0] <: edges[j+2];
+                // if not pause assign edges
+                if (pause != 0) {
+
+
+                }
+                if (rightDone + leftDone == 2) { //when both sub distributors are ready.
+                    if (pause == 0) { //assign edges
+                        for (int i = 0; i < IMHT; i ++ ){
+                            for (int j = 0; j < 4; j++ ) {// receiving edges
+                                select {
+                                   case c_subDist[int l] :> uint32_t edge:
+                                       uchar k = 0;
+                                       uchar m = 2;
+                                       if (l == 0) {
+                                           edges[k] = edge;
+                                           k ++;
+                                       }
+                                       else {
+                                           edges[m] = edge;
+                                           m ++;
+                                       }
+                                       break;
+                                 }
+                             }
+                             edges[3] = assignRightEdge(edges[3],length, edges[0]);
+                             edges[0] = assignLeftEdge(edges[3], edges[0]);
+                             edges[1] = assignRightEdge(edges[1], 30, edges[2]);
+                             edges[2] = assignLeftEdge(edges[1], edges[2]);
+                             for (int j = 0; j < 2; j ++) {
+                                 c_subDist[0] <: edges[j];
+                                 c_subDist[0] <: edges[j+2];
+                             }
+                         }
+                         rightDone = 0;
+                         leftDone = 0;
+                         printf("done\n");
+                    }
+
+                    if (pause == 1) {//recieve picture.
+                        for (int i = 0; i < IMHT; i ++) {
+                            for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
+                                if (j < SPLITWIDTH) {
+                                    c_subDist[0] :> val;
+                                    printBinary(val,30);
+                                }
+                            }
                         }
                     }
-                    rightDone = 0;
-                    leftDone = 0;
-                    printf("done\n");
                 }
 
                 break;
@@ -366,7 +389,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   uchar nextTurn = 0; //boolean for next Turn
 
   uint32_t actualWidth = 0; // actual width of the array used.
-  uint32_t input = 0;
+  uint32_t val = 0;
 
   /*
    * index[j][i] for the workers
@@ -398,63 +421,64 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (1) {
-      if (rowsSent == IMHT) { nextTurn = 1; } //increment turn
-      if (rowsReceived == IMHT) { readIn = 0; }
+      if (rowsReceived == IMHT) { readIn = 0; } //finished readIn!
+      if (rowsSent == IMHT && colsSent == IMHT * actualWidth) { nextTurn = 1; printf("done turn"); } //next turn!!
       // starts to work the workers.
       if (safe && workersStarted < NUMBEROFWORKERS) {
           for (int x = 0; x < 3 ; x++) {
-              c_toWorker[workersStarted] <: linePart[colsSent][rowsSent - 1 + x + IMHT % IMHT];
+              c_toWorker[workersStarted] <: linePart[colsSent % actualWidth][(rowsSent - 1 + x + IMHT) % IMHT];
           }
+          index[workersStarted][0] = colsSent % actualWidth;
+          index[workersStarted][1] = rowsSent % IMHT;
           colsSent ++;
           rowsSent ++;
-          index[workersStarted][0] = colsSent % actualWidth;
-          index[workersStarted][1] = rowsSent;
           workersStarted ++;
       }
+      // various conditions for "safety"
+      //Various if conditions for unsafe working of worker.
+      if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
+      else if (rowsReceived == IMHT && colsReceived == IMHT * actualWidth) { safe = 1; }
+      else { safe = 0; }
+
       select {
         //case when receiving from the (main distributor).
-        case c_in :> input:
+        case c_in :> val:
             if (readIn) {
-                linePart[(colsReceived + 1) % actualWidth][rowsReceived] = input;
+                linePart[(colsReceived + 1) % actualWidth][rowsReceived] = val;
                 colsReceived ++;
                 if ((colsReceived + 1) % actualWidth) { rowsReceived ++; } //increment height when i goes over the "edge";
                 if (rowsReceived == IMHT && colsReceived == IMHT * actualWidth) {
                     readIn = 0; //finished readIn.
                 }
-
-                //Various if conditions for unsafe working of worker.
-                if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
-                else if (rowsReceived == IMHT) { safe = 1; }
-                else { safe = 0; }
             }
             else if (nextTurn == 0) {
-                if (input == 0) {
+                if (val == 0) {
                     pause = 1;
                 }
-                else if (input == 1) {
+                else if (val == 1) {
                     pause = 0;
                 }
             }
             break;
         //when safe for worker to send back data.
         //case when receiving from the work.
-        case (safe) => c_toWorker[int i] :> uint32_t output:
-            //copyPart[l][(k + 1) % IMHT] = output;
+        case (safe) => c_toWorker[int i] :> copyPart[(int) index[i][0]][(int) index[i][1]]:
             if (nextTurn == 0) {
                 for (int x = 0; x < 3 ; x++) {
                     c_toWorker[i] <: linePart[(index[i][0])][(index[i][1])];
                 }
                 index[i][0] = colsSent % actualWidth;
-                index[i][1] = rowsSent;
+                index[i][1] = rowsSent % IMHT;
                 colsSent ++;
-                if ((colsSent + 1) % actualWidth == 0) { rowsSent ++; }
-                if (rowsSent == IMHT && colsSent == IMHT * actualWidth) {
-                    nextTurn = 1; //finished readIn.
-                }
+                if (colsSent % actualWidth == 0) { rowsSent ++; }
+
             }
             break;
         default:
             if (nextTurn){
+                //letting distributor know (this) is ready
+                c_in <: 1;
+                c_in :> pause;
                 //send edges cases when not paused.
                 if (pause == 0) {
                     printf( "\nOne processing round completed...\n" );
@@ -492,7 +516,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                 }
             }
             break;
-
       }
   }
 }
