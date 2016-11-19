@@ -8,20 +8,23 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
-#define NUMBEROFWORKERS 1         //number of workers
-#define UINTARRAYWIDTH 1             //ceil(IMWD - 1 / 31) + 1
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
+//the variables below must change when image size changes
+#define SPLITWIDTH 2
+#define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
+
+#define NUMBEROFWORKERS 2         //number of workers
 #define NUMBEROFSUBDIST 2   //number of subdistributors.
 
 // Port to access xCORE-200 buttons.
-in port buttons = XS1_PORT_4E;
+on tile[0]: in port buttons = XS1_PORT_4E;
 // Buttons signals.
 #define SW2 13     // SW2 button signal.
 #define SW1 14     // SW1 button signal.
 
 // Port to access xCore-200 LEDs.
-out port leds = XS1_PORT_4F;
+on tile[0]: out port leds = XS1_PORT_4F;
 // LED signals.
 #define OFF  0     // Signal to turn the LED off.
 #define GRNS 1     // Signal to turn the separate green LED on.
@@ -30,8 +33,8 @@ out port leds = XS1_PORT_4F;
 #define RED  8     // Signal to turn the red LED on.
 
 // Interface ports to orientation
-port p_scl = XS1_PORT_1E;
-port p_sda = XS1_PORT_1F;
+on tile[0]: port p_scl = XS1_PORT_1E;
+on tile[0]: port p_sda = XS1_PORT_1F;
 
 #define FXOS8700EQ_I2C_ADDR 0x1E  //register addresses for orientation
 #define FXOS8700EQ_XYZ_DATA_CFG_REG 0x0E
@@ -45,6 +48,9 @@ port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 typedef unsigned char uchar;      //using uchar as shorthand
+
+char infname[] = "test.pgm";     //put your input image path here
+char outfname[] = "testout.pgm"; //put your output image path here
 
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -70,13 +76,16 @@ int showLEDs(out port p, chanend fromDist) {
 // READ BUTTONS and send button pattern to distributor.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void buttonListener(in port b, chanend c_toDist) {
+void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
     int r;  // Received button signal.
     while (1) {
         b when pinseq(15)  :> r;     // Check that no button is pressed.
         b when pinsneq(15) :> r;     // Check if some buttons are pressed.
-        if (r == SW1 || r == SW2) {  // If either button is pressed
-            c_toDist <: r;           // send button pattern to distributor.
+        if (r == SW1) {  // If either button is pressed
+            c_toDataIn <: r;           // send button pattern to distributor.
+        }
+        if (r == SW2) {
+            c_toDist <: r;
         }
     }
 }
@@ -188,12 +197,23 @@ uint32_t assignEdges(uint32_t left, uint32_t middle,uchar midLength, uint32_t ri
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], chanend c_out)
+void DataInStream(char infname[], chanend c_out, chanend c_fromButtons)
 {
   int res;
   uchar line[30];
   uint32_t row[UINTARRAYWIDTH];
   uchar length = 0;
+  int buttonPressed;  // The button pressed on the xCore-200 Explorer.
+  // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
+  printf( "Waiting for SW1 button press...\n" );
+  int initiated = 0;  // Whether processing has been initiated.
+
+  while (!initiated) {
+      c_fromButtons :> buttonPressed;
+      if (buttonPressed == SW1) {
+          initiated = 1;
+      }
+  }
   printf( "DataInStream: Start...\n" );
 
   //Open PGM file
@@ -245,29 +265,21 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
     uint32_t edges[4];
 
     int buttonPressed;  // The button pressed on the xCore-200 Explorer.
-    // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
-    printf( "Waiting for SW1 button press...\n" );
-    int initiated = 0;  // Whether processing has been initiated.
-
-    while (!initiated) {
-        c_fromButtons :> buttonPressed;
-        if (buttonPressed == SW1) {
-            initiated = 1;
-        }
-    }
+    //sending distributors information about the array size to be used.
+    c_subDist[0] <: (uint32_t) SPLITWIDTH;
+    c_subDist[1] <: (uint32_t) UINTARRAYWIDTH - SPLITWIDTH;
     //Distributing image from c_in to sub distributors.
     for( int i = 0; i < IMHT; i++ ) {
         length = 30;
         for (int j = 0; j < UINTARRAYWIDTH; j++) {
             c_in :> val;
-            if (j < UINTARRAYWIDTH / 2) {
+            if (j < SPLITWIDTH) {
                 c_subDist[0] <: val;
             } else {
                 c_subDist[1] <: val;
             }
         }
     }
-
     length = IMWD % 30;
     while (1) {
         select {
@@ -324,6 +336,9 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                             c_subDist[0] <: edges[j+2];
                         }
                     }
+                    rightDone = 0;
+                    leftDone = 0;
+                    printf("done\n");
                 }
 
                 break;
@@ -342,14 +357,16 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
 /////////////////////////////////////////////////////////////////////////////////////////
 void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 {
-  uint32_t linePart[UINTARRAYWIDTH][IMHT];
-  uint32_t copyPart[UINTARRAYWIDTH][IMHT];
+  uint32_t linePart[SPLITWIDTH][IMHT]; //stores processing image
+  uint32_t copyPart[SPLITWIDTH][IMHT]; //stores results.
 
   uchar safe = 0; // safe to send to workers
-  uchar turn = 1; // turn number
   uchar pause = 0; // boolean for pause state
   uchar readIn = 1; //boolean for reading in files.
   uchar nextTurn = 0; //boolean for next Turn
+
+  uint32_t actualWidth = 0; // actual width of the array used.
+  uint32_t input = 0;
 
   /*
    * index[j][i] for the workers
@@ -376,12 +393,12 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
-
+  c_in :> actualWidth;
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (1) {
-      if (rowsSent == IMHT) { nextTurn = 1; turn ++; } //increment turn
+      if (rowsSent == IMHT) { nextTurn = 1; } //increment turn
       if (rowsReceived == IMHT) { readIn = 0; }
       // starts to work the workers.
       if (safe && workersStarted < NUMBEROFWORKERS) {
@@ -390,17 +407,33 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
           }
           colsSent ++;
           rowsSent ++;
-          index[workersStarted][0] = colsSent % UINTARRAYWIDTH;
+          index[workersStarted][0] = colsSent % actualWidth;
           index[workersStarted][1] = rowsSent;
           workersStarted ++;
       }
       select {
         //case when receiving from the (main distributor).
-        case readIn => c_in :> linePart[(colsReceived + 1) % UINTARRAYWIDTH][rowsReceived]:
-            colsReceived ++;
-            if ((colsReceived + 1) % UINTARRAYWIDTH) { rowsReceived ++; } //increment height when i goes over the "edge";
-            if (rowsReceived == IMHT && colsReceived == IMHT * UINTARRAYWIDTH) {
-                readIn = 0; //finished readIn.
+        case c_in :> input:
+            if (readIn) {
+                linePart[(colsReceived + 1) % actualWidth][rowsReceived] = input;
+                colsReceived ++;
+                if ((colsReceived + 1) % actualWidth) { rowsReceived ++; } //increment height when i goes over the "edge";
+                if (rowsReceived == IMHT && colsReceived == IMHT * actualWidth) {
+                    readIn = 0; //finished readIn.
+                }
+
+                //Various if conditions for unsafe working of worker.
+                if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
+                else if (rowsReceived == IMHT) { safe = 1; }
+                else { safe = 0; }
+            }
+            else if (nextTurn == 0) {
+                if (input == 0) {
+                    pause = 1;
+                }
+                else if (input == 1) {
+                    pause = 0;
+                }
             }
             break;
         //when safe for worker to send back data.
@@ -411,52 +444,55 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                 for (int x = 0; x < 3 ; x++) {
                     c_toWorker[i] <: linePart[(index[i][0])][(index[i][1])];
                 }
-                index[i][0] = colsSent % UINTARRAYWIDTH;
+                index[i][0] = colsSent % actualWidth;
                 index[i][1] = rowsSent;
                 colsSent ++;
-                if ((colsSent + 1) % UINTARRAYWIDTH == 0) { rowsSent ++; }
-                if (rowsSent == IMHT && colsSent == IMHT * UINTARRAYWIDTH) {
+                if ((colsSent + 1) % actualWidth == 0) { rowsSent ++; }
+                if (rowsSent == IMHT && colsSent == IMHT * actualWidth) {
                     nextTurn = 1; //finished readIn.
                 }
             }
             break;
         default:
-
-            if (nextTurn) {
-                c_in <: 1; //signalling done...
-                //logic for sending edges
-                for (int i = 0; i < IMHT; i++){
-                    for (int j = 0; j < UINTARRAYWIDTH; j++) {
-                        if ( j  < UINTARRAYWIDTH - 1) {
-                            linePart[j][i] = assignRightEdge(linePart[j][i],30,linePart[j + 1][i]);
+            if (nextTurn){
+                //send edges cases when not paused.
+                if (pause == 0) {
+                    printf( "\nOne processing round completed...\n" );
+                    for (int i = 0; i < IMHT; i++) {
+                        for (int j = 0; j < actualWidth ; j++) {
+                            printBinary(copyPart[j][i], 16);
                         }
-                        if (j > 0 ) {
-                            linePart[j][i] = assignLeftEdge(linePart[j - 1][i], linePart[j][i]);
-                        }
-
                     }
-                    c_in <: linePart[0][i];
-                    c_in <: linePart[UINTARRAYWIDTH - 1][i];
-                    c_in :>linePart[0][i];
-                    c_in :> linePart[UINTARRAYWIDTH - 1][i];
-                }
-             }
+                    c_in <: 1; //signalling done...
+                    //logic for sending edges
+                    for (int i = 0; i < IMHT; i++){
+                        for (int j = 0; j < actualWidth; j++) {
+                            if (j  < actualWidth - 1) {
+                                linePart[j][i] = assignRightEdge(copyPart[j][i],30,copyPart[j + 1][i]);
+                            }
+                            if (j > 0) {
+                                linePart[j][i] = assignLeftEdge(copyPart[j - 1][i], copyPart[j][i]);
+                            }
+                        }
+                        c_in <: linePart[0][i];
+                        c_in <: linePart[actualWidth - 1][i];
+                        c_in :>linePart[0][i];
+                        c_in :> linePart[actualWidth - 1][i];
 
+                        //reset variables??
+                    }
+                }
+                //send image to main distributor.
+                if (pause) {
+                    for (int i = 0; i < IMHT; i ++) {
+                        for (int j = 0; j < actualWidth; j ++) {
+                            c_in <: linePart[j][i];
+                        }
+                    }
+                }
+            }
             break;
 
-      }
-
-      //Varies if conditions for unsafe working of worker.
-      if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
-      else if (rowsReceived == IMHT) {
-          safe = 1; }
-      else { safe = 0; }
-  }
-
-  printf( "\nOne processing round completed...\n" );
-  for (int i = 0; i < IMHT; i++) {
-      for (int j = 0; j < UINTARRAYWIDTH ; j++) {
-          printBinary(copyPart[j][i], 16);
       }
   }
 }
@@ -612,31 +648,27 @@ int main(void) {
 
 i2c_master_if i2c[1];               //interface to orientation
 
-
-char infname[] = "test.pgm";     //put your input image path here
-char outfname[] = "testout.pgm"; //put your output image path here
 chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
 chan c_workers[NUMBEROFWORKERS];     // Worker channels (one for each worker).
 chan c_otherWorkers[NUMBEROFWORKERS];
-chan c_buttonsToDist, c_DistToLEDs;  // Button and LED channels.
+chan c_buttonsToDist, c_DistToLEDs, c_buttonsToData;  // Button and LED channels.
 chan c_subDist[NUMBEROFSUBDIST];
 
 par {
-    i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
-    orientation(i2c[0],c_control);        //client thread reading orientation data
-    DataInStream(infname, c_inIO);          //thread to read in a PGM image
-    DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    mainDistributor(c_buttonsToDist, c_DistToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);
-    subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);//thread to coordinate work on image
-    subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
+    on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
+    on tile[0]: orientation(i2c[0],c_control);        //client thread reading orientation data
+    on tile[0]: DataInStream(infname, c_inIO, c_buttonsToData);          //thread to read in a PGM image
+    on tile[0]: DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
+    on tile[1]: mainDistributor(c_buttonsToDist, c_DistToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);
+    on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);//thread to coordinate work on image
+    on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
     par (int i = 0; i < NUMBEROFWORKERS; i++){ //making workers
-        worker(c_workers[i]);                  // thread to do work on an image.
-        worker(c_otherWorkers[i]);
-
+        on tile[1]: worker(c_workers[i]);                  // thread to do work on an image.
+        on tile[0]: worker(c_otherWorkers[i]);
     }
 
-    buttonListener(buttons, c_buttonsToDist);  // Thread to listen for button presses.
-    showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
+    on tile[0]: buttonListener(buttons,c_buttonsToData, c_buttonsToDist);  // Thread to listen for button presses.
+    on tile[0]: showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
   }
 
   return 0;
