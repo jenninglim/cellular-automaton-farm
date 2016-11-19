@@ -270,7 +270,6 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
     c_subDist[1] <: (uint32_t) UINTARRAYWIDTH - SPLITWIDTH;
     //Distributing image from c_in to sub distributors.
     for( int i = 0; i < IMHT; i++ ) {
-        length = 30;
         for (int j = 0; j < UINTARRAYWIDTH; j++) {
             c_in :> val;
             if (j < SPLITWIDTH) {
@@ -413,18 +412,21 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
   uchar workersStarted = 0;
 
+  //Getting actual width from main dsitributor
+  c_in :> actualWidth;
 
   //Starting up and wait for tilting of the xCore-200 Explorer
-  printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
-  c_in :> actualWidth;
+  printf( "ProcessImage: Start, size = %dx%d\n", IMHT, actualWidth );
+
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (1) {
       if (rowsReceived == IMHT) { readIn = 0; } //finished readIn!
-      if (rowsSent == IMHT && colsSent == IMHT * actualWidth) { nextTurn = 1; printf("done turn"); } //next turn!!
+      if (rowsSent == IMHT) { nextTurn = 1; printf("done turn"); } //next turn!!
       // starts to work the workers.
       if (safe && workersStarted < NUMBEROFWORKERS) {
+          printf("starting worker %d\n", actualWidth);
           for (int x = 0; x < 3 ; x++) {
               c_toWorker[workersStarted] <: linePart[colsSent % actualWidth][(rowsSent - 1 + x + IMHT) % IMHT];
           }
@@ -436,20 +438,24 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
       // various conditions for "safety"
       //Various if conditions for unsafe working of worker.
-      if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
-      else if (rowsReceived == IMHT && colsReceived == IMHT * actualWidth) { safe = 1; }
-      else { safe = 0; }
 
+      if (rowsReceived == IMHT) { safe = 1;  }
+      //else if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
+      else { safe = 0; }
+      /*
+      if (safe) {
+          printf("safe\n");
+      }
+      else {
+          printf("unsafe\n");
+      }*/
       select {
         //case when receiving from the (main distributor).
         case c_in :> val:
             if (readIn) {
                 linePart[(colsReceived + 1) % actualWidth][rowsReceived] = val;
                 colsReceived ++;
-                if ((colsReceived + 1) % actualWidth) { rowsReceived ++; } //increment height when i goes over the "edge";
-                if (rowsReceived == IMHT && colsReceived == IMHT * actualWidth) {
-                    readIn = 0; //finished readIn.
-                }
+                if (colsReceived % actualWidth == 0) { rowsReceived ++; } //increment height when i goes over the "edge";
             }
             else if (nextTurn == 0) {
                 if (val == 0) {
@@ -474,7 +480,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
             }
             break;
-        default:
+        default: /*
             if (nextTurn){
                 //letting distributor know (this) is ready
                 c_in <: 1;
@@ -514,7 +520,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                         }
                     }
                 }
-            }
+            } */
             break;
       }
   }
