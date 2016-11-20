@@ -111,43 +111,8 @@ void printBinary(uint32_t queriedInt, uchar length) {
             printf("1 ");
         }
     }
-    printf("\n");
 }
 
-/* Compresses the array of char.
- * Input: array of uchar of length 32
- * Output: Uint32 isomorphic to the array
- */
-uint32_t bytesToBits(uchar line[], uchar length) {
-    uint32_t output = 0;
-    for (int i = 0; i < length; i ++) {
-        if (line[i] == 255) {
-            output = output | 0x00000001 << (31 - i);
-        }
-    }
-    return output;
-}
-
-/* ad hoc concatentation to uint32 obselete
- * Input:
- *      head: addeds to the start of the array
- *      array: array to be modified
- *      length: <= 30
- *      tail: number of elememts to be copied
- */
-uint32_t formRow(uchar head, uchar array[], uchar length, uchar tail) {
-    uchar temp[32];
-    temp[0] = head;
-    for (int i = 0 ; i < length + 1; i ++) {
-        if (i != length) {
-            temp[i+ 1] = array[i];
-        }
-        else {
-            temp[i + 1] = tail;
-        }
-    }
-    return bytesToBits(temp, length + 2);
-}
 /*
  * adhoc compress
  */
@@ -164,9 +129,9 @@ uint32_t compress(uchar array[], uchar length) {
 /*
  * assignLeftEdge assumes that left is already in the correct form).
  */
-uint32_t assignLeftEdge(uint32_t left, uint32_t middle) {
+uint32_t assignLeftEdge(uint32_t left, uchar leftLength, uint32_t middle) {
     uint32_t val = middle;
-    if (returnBitInt(left,31) == 255) {
+    if (returnBitInt(left,leftLength) == 255) {
         val = val | 0x00000001 << 31;
     }
     return val;
@@ -177,18 +142,9 @@ uint32_t assignLeftEdge(uint32_t left, uint32_t middle) {
 uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
     uint32_t val = middle;
     if (returnBitInt(right,1) == 255) {
-        val = val | 0x00000001 << (31 - midLength);
+        val = val | 0x00000001 << (30 - midLength);
         val = val | 0x00000001;
     }
-    return val;
-}
-/*
- *
- */
-uint32_t assignEdges(uint32_t left, uint32_t middle,uchar midLength, uint32_t right) {
-    uint32_t val = middle;
-    val = assignRightEdge(middle, midLength, right); //assign left depends on assign right.
-    val = assignLeftEdge(left,middle);
     return val;
 }
 
@@ -232,19 +188,26 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons)
           }
           _readinline( line, length);
           row[i] = compress(line,length);
-
       }
       //assign edges to rows
       for (int i = 0; i < UINTARRAYWIDTH; i++ ) {
           length = 30;
-          if (i == ceil(IMWD / 30)) {
+          if (i + 1 == UINTARRAYWIDTH) {
               length = IMWD % 30;
           }
-          row[i] = assignEdges(row[(i-1+UINTARRAYWIDTH) % UINTARRAYWIDTH], row[i],length, row[ (i + 1) %UINTARRAYWIDTH]);
+          row[i] = assignRightEdge(row[i], length, row[ (i + 1) % UINTARRAYWIDTH]);
+
+      }
+      for (int i = 0; i < UINTARRAYWIDTH; i++ ) {
+          length = 30;
+          if ((i - 1 + UINTARRAYWIDTH) % UINTARRAYWIDTH == UINTARRAYWIDTH - 1) {
+              length = IMWD % 30;
+          }
+          row[i] = assignLeftEdge(row[(i-1+UINTARRAYWIDTH) % UINTARRAYWIDTH], length, row[i]);
           c_out <: row[i];
       }
-
   }
+
 
   //Close PGM image file
   _closeinpgm();
@@ -255,7 +218,7 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons)
 
 void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
-    uchar pause = 0;
+    uchar pause = 1; //this needs changing
     uchar aliveCells = 0;
     uchar rightDone = 0;
     uchar leftDone = 0;
@@ -293,18 +256,20 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 break;
             case fromAcc :> pause:
                 //Send signal to distributor.
-                break;
+                break; /*
             case c_subDist[int i] :> val:
 
                 //tells subDistributors to pause (or not).
                 aliveCells = aliveCells + val;
+
                 if (pause == 0) { c_subDist[i] <: 1; }// change this from to 1 (for debug)
-                else if (pause == 1) { c_subDist[i] <: 1; }
+                else if (pause == 1) {  c_subDist[i] <: 1; printf("here1\n"); }
                 if (i == 0) { //leftmost subDist is ready.
                     leftDone = 1;
                 } else { //rightmost subDist is ready.
                     rightDone = 1;
                 }
+                printf("here2\n");
 
                 if (rightDone + leftDone == 0) {
                     aliveCells = 0; //reset alive cells at the end of each round.
@@ -313,6 +278,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                     }
                 }
 
+                printf("here3\n");
                 // if not pause assign edges
                 if (pause != 0) {
 
@@ -338,9 +304,9 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                                  }
                              }
                              edges[3] = assignRightEdge(edges[3],length, edges[0]);
-                             edges[0] = assignLeftEdge(edges[3], edges[0]);
+                             edges[0] = assignLeftEdge(edges[3], 30,  edges[0]);
                              edges[1] = assignRightEdge(edges[1], 30, edges[2]);
-                             edges[2] = assignLeftEdge(edges[1], edges[2]);
+                             edges[2] = assignLeftEdge(edges[1], 30, edges[2]);
                              for (int j = 0; j < 2; j ++) {
                                  c_subDist[0] <: edges[j];
                                  c_subDist[0] <: edges[j+2];
@@ -357,13 +323,17 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                                 if (j < SPLITWIDTH) {
                                     c_subDist[0] :> val;
                                     printBinary(val,30);
+                                } else {
+                                    c_subDist[0] :> val;
+                                    printBinary(val,30);
                                 }
                             }
+                            printf("\n");
                         }
                     }
                 }
 
-                break;
+                break; */
 
         }
     }
@@ -404,11 +374,14 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
   }
 
-  uchar colsReceived = 0;   //index for the width of input array i
-  uchar rowsReceived = 0;  //index for the height of input array j
+  uchar workerColsReceived = 0;
+  uchar workerRowsReceived = 0;
 
-  uchar colsSent = 0; //number of columns sent. l
-  uchar rowsSent = 0; //number of rows sent. k
+  uchar distColsReceived = 0;   //number of columns received from the distributor.
+  uchar distRowsReceived = 0;  //numbers of rows received from the distributor
+
+  uchar workerColsSent = 0; //number of columns sent to the worker. l
+  uchar workerRowsSent = 0; //number of rows sent to the worker. k
 
   uchar workersStarted = 0;
 
@@ -422,25 +395,24 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (1) {
-      if (rowsReceived == IMHT) { readIn = 0; } //finished readIn!
-      if (rowsSent == IMHT) { nextTurn = 1; printf("done turn"); } //next turn!!
+      if (distRowsReceived == IMHT) { readIn = 0; } //finished readIn!
+      if (workerRowsSent == IMHT && workerRowsReceived == IMHT) { nextTurn = 1; } //next turn!!
       // starts to work the workers.
       if (safe && workersStarted < NUMBEROFWORKERS) {
-          printf("starting worker %d\n", actualWidth);
           for (int x = 0; x < 3 ; x++) {
-              c_toWorker[workersStarted] <: linePart[colsSent % actualWidth][(rowsSent - 1 + x + IMHT) % IMHT];
+              c_toWorker[workersStarted] <: linePart[workerColsSent % actualWidth][(workerRowsSent - 1 + x + IMHT) % IMHT];
           }
-          index[workersStarted][0] = colsSent % actualWidth;
-          index[workersStarted][1] = rowsSent % IMHT;
-          colsSent ++;
-          rowsSent ++;
+          index[workersStarted][0] = workerColsSent % actualWidth;
+          index[workersStarted][1] = workerRowsSent % IMHT;
+          workerColsSent ++;
+          if (workerColsSent % actualWidth == 0) { workerRowsSent ++; }
           workersStarted ++;
       }
       // various conditions for "safety"
       //Various if conditions for unsafe working of worker.
 
-      if (rowsReceived == IMHT) { safe = 1;  }
-      //else if (rowsSent + 3 <= rowsReceived && rowsReceived < IMHT) { safe = 1; }
+      if (distRowsReceived == IMHT) { safe = 1;  }
+      //else if (workerRowsSent + 3 <= distRowsReceived && distRowsReceived < IMHT) { safe = 1; }
       else { safe = 0; }
       /*
       if (safe) {
@@ -453,9 +425,9 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
         //case when receiving from the (main distributor).
         case c_in :> val:
             if (readIn) {
-                linePart[(colsReceived + 1) % actualWidth][rowsReceived] = val;
-                colsReceived ++;
-                if (colsReceived % actualWidth == 0) { rowsReceived ++; } //increment height when i goes over the "edge";
+                linePart[distColsReceived % actualWidth][distRowsReceived] = val;
+                distColsReceived ++;
+                if (distColsReceived % actualWidth == 0) { distRowsReceived ++; } //increment height when i goes over the "edge";
             }
             else if (nextTurn == 0) {
                 if (val == 0) {
@@ -469,22 +441,52 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
         //when safe for worker to send back data.
         //case when receiving from the work.
         case (safe) => c_toWorker[int i] :> copyPart[(int) index[i][0]][(int) index[i][1]]:
-            if (nextTurn == 0) {
+            workerColsReceived++;
+            if (workerColsReceived % actualWidth == 0) { workerRowsReceived ++; }
+            if (workerRowsSent < IMHT) {
                 for (int x = 0; x < 3 ; x++) {
-                    c_toWorker[i] <: linePart[(index[i][0])][(index[i][1])];
+                    c_toWorker[i] <: linePart[workerColsSent % actualWidth][(workerRowsSent + 1 - x + IMHT) % IMHT];
                 }
-                index[i][0] = colsSent % actualWidth;
-                index[i][1] = rowsSent % IMHT;
-                colsSent ++;
-                if (colsSent % actualWidth == 0) { rowsSent ++; }
+                index[i][0] = workerColsSent % actualWidth;
+                index[i][1] = workerRowsSent % IMHT;
+                workerColsSent ++;
+                if (workerColsSent % actualWidth == 0) { workerRowsSent ++; }
 
             }
             break;
-        default: /*
+        default:
             if (nextTurn){
+                /*for debug
+                if (actualWidth == 2) {
+
+                    for (int i = 0; i < IMHT; i++) {
+                        for (int j = 0; j < actualWidth; j ++) {
+                            printBinary(linePart[j][i], 30);
+                        }
+                        printf("\n");
+                    }
+                    printf("\n");
+
+                    printf("\n");
+                    for (int i = 0; i < IMHT; i++) {
+                        for (int j = 0; j < actualWidth; j ++) {
+                            printBinary(copyPart[j][i], 30);
+                        }
+                        printf("\n");
+                    }
+
+                } */
+
+
+                /*
+                 * actual code
                 //letting distributor know (this) is ready
                 c_in <: 1;
-                c_in :> pause;
+                printf("here11\n");
+                c_in :> val;
+                if (val == 1) { pause = 1; }
+                else { pause = 0; }
+                printf("here22\n");
                 //send edges cases when not paused.
                 if (pause == 0) {
                     printf( "\nOne processing round completed...\n" );
@@ -519,8 +521,8 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                             c_in <: linePart[j][i];
                         }
                     }
-                }
-            } */
+                } */
+            }
             break;
       }
   }
@@ -563,7 +565,7 @@ void worker(chanend c_fromDist) {
 
             c_fromDist :> lines[i];
         }
-        for (int j = 1 ; j < 31; j++) { // goes through each bit in the input
+        for (int j = 1; j < 31; j++) { // goes through each bit in the input
             count = 0;
             state = 0;
             for (int i = 0; i < 3; i++) { // goes through each row
@@ -578,7 +580,8 @@ void worker(chanend c_fromDist) {
             }
             results[j - 1] = deadOrAlive(state, count);
         }
-        uint32_t output = bytesToBits(results, 30);
+        uint32_t output = 0;
+        output = compress(results, 30);
         c_fromDist <: output;
     }
 }
