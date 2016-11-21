@@ -7,17 +7,18 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define IMHT 64    // Image height.
-#define IMWD 64    // Image width.
-#define SEGHT 16   // Height of a farming segment.
+#define IMHT 16    // Image height.
+#define IMWD 16    // Image width.
+#define SEGHT 4   // Height of a farming segment.
 
 #define MAX_ROUNDS 2  // Maxiumum number of rounds to be processed.
 
-#define WORKERS 6  // Total number of workers processing the image (must be an even number).
+#define WORKERS 4  // Total number of workers processing the image (must be an even number).
 
-// Worker Signals
-#define CARRYON 0
-#define STOP    1
+// Signals sent between Master and Slave Distributors.
+#define CONTINUE 0
+#define PAUSE    1
+#define STOP     2
 
 // Port to access xCORE-200 buttons.
 on tile[0]: in port buttons = XS1_PORT_4E;
@@ -52,8 +53,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[] = "64x64.pgm";      // Input image path
-char outfname[] = "64x64out2.pgm";  // Output image path
+char infname[] = "test.pgm";      // Input image path
+char outfname[] = "testout.pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -127,24 +128,6 @@ uchar DataInStream(chanend c_out) {
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
-// Counts the number of live cells in an image.
-//
-/////////////////////////////////////////////////////////////////////////////////////////
-int countLiveCells(uchar image[IMWD][IMHT]) {
-    int count = 0;
-    for (int y = 0; y < IMHT; y++) {
-        for (int x = 0; x < IMWD; x++) {
-            if (image[x][y] == 255) {
-                count ++;
-            }
-        }
-    }
-    return count;
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//
 // Provides the value of the current tile's timer in seconds.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -163,9 +146,8 @@ double getCurrentTime() {
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void printStatusReport(double start, double current, int rounds, uchar image[IMWD][IMHT], int final) {
-    int alive = countLiveCells(image);  // The number of live cells in the image.
-    double time = current - start;      // Total time elapsed.
+void printStatusReport(double start, double current, int rounds, int liveCells, int final) {
+    double time = current - start;  // Total time elapsed.
 
     printf("\n----------------------------------\n");
     if (final) {
@@ -179,7 +161,7 @@ void printStatusReport(double start, double current, int rounds, uchar image[IMW
            "Time Elapsed: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           rounds, alive, IMHT*IMWD, time, WORKERS);
+           rounds, liveCells, IMHT*IMWD, time, WORKERS);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -213,26 +195,14 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
     for (int y = 0; y < IMHT; y++) {
         for (int x = 0; x < IMWD; x++ ) {
             c_in :> pixel;
-            if (x < IMWD/2) {
-                c_toSlave[0] <: pixel;
-            }
-            else {
-                c_toSlave[1] <: pixel;
-            }
-
-            if (x == 0) {
-                edges[0][y] = pixel;
-            }
-            else if (x+1 == IMWD/2) {
-                edges[1][y] = pixel;
-            }
-            else if (x == IMWD/2) {
-                edges[2][y] = pixel;
-            }
-            else if (x+1 == IMWD) {
-                edges[3][y] = pixel;
-            }
-
+            // Split the image between the slave distributors.
+            if   (x < IMWD/2) c_toSlave[0] <: pixel;
+            else              c_toSlave[1] <: pixel;
+            // Identify and store the overlapping edges.
+            if      ( x  == 0)      edges[0][y] = pixel;
+            else if (x+1 == IMWD/2) edges[1][y] = pixel;
+            else if ( x  == IMWD/2) edges[2][y] = pixel;
+            else if (x+1 == IMWD)   edges[3][y] = pixel;
         }
     }
     c_toLEDs <: OFF;  // Turn OFF the green LED to indicate reading of the image has FINISHED.
@@ -249,8 +219,9 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
     printf("\nProcessing...\n");
     int rounds = 0;                     // The number of rounds processed.
     int running = 1;                    // Whether to keep running.
-    //double start = getCurrentTime();    // Start time of processing.
+    double start = getCurrentTime();    // Start time of processing.
     double current = getCurrentTime();  // Time after processing a round.
+    int liveCells[2];                   // The number of live cells in the current image.
 
     while (running) {
 
@@ -258,13 +229,16 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
             // When SW2 button is pressed, stop processing, print and save the current image.
             case c_fromButtons :> buttonPressed:
                 if (buttonPressed == SW2) {
-                    printf("stop\n");
+                    printf("Saving new image...\n");
                     // SEND SIGNAL TO DISTRIBUTORS TO STOP AND SEND THEIR IMAGE.
                     c_toSlave[0] <: STOP;
                     c_toSlave[1] <: STOP;
 
+                    c_toSlave[0] :> liveCells[0];
+                    c_toSlave[1] :> liveCells[1];
+                    printStatusReport(start, current, rounds, liveCells[0]+liveCells[1], 1);
+
                     c_toLEDs <: BLU;  // Turn ON the blue LED to indicate export of the image has STARTED.
-                    //printStatusReport(start, current, rounds, image, 1);
                     //printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
                     for (int y = 0; y < IMHT; y++) {
                         //printf("[%2.1d]", y);
@@ -289,19 +263,34 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
             // When the board is vertical, pause the state and print a status report.
             // Resume processing when horizontal again.
             case fromAcc :> tilted:
-                printf("tilted\n");
+                printf("Board vertical\n");
                 // Board vertical.
                 c_toLEDs <: RED;  // Turn ON the red LED to indicate that the state is PAUSED.
-                //printStatusReport(start, current, rounds, image, 0);
+
+                // SEND SIGNAL TO DISTRIBUTORS THAT PROCESSING IS PAUSED.
+                c_toSlave[0] <: PAUSE;
+                c_toSlave[1] <: PAUSE;
+
+                // RECEIVE NUMBER OF LIVE CELLS IN EACH SLAVE DISTRIBUTOR IMAGE.
+                c_toSlave[0] :> liveCells[0];
+                c_toSlave[1] :> liveCells[1];
+
+                // PRINT STATUS REPORT.
+                printStatusReport(start, current, rounds, liveCells[0]+liveCells[1], 0);
 
                 // Board horizontal.
                 fromAcc :> tilted;
+                printf("Board horizontal\n");
+
+                // SEND SIGNAL TO DISTRIBUTORS TO CONTINUE.
+                c_toSlave[0] <: CONTINUE;
+                c_toSlave[1] <: CONTINUE;
                 c_toLEDs <: OFF;  // Turn OFF the red LED to indicate that the state is UNPAUSED.
                 break;
 
             // Otherwise, continue processing the image.
             default:
-                if (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
+                //if (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
                     // Alternate the separate green light on and off each round while processing rounds.
                     if (rounds % 2 == 0) {
                         c_toLEDs <: GRNS;
@@ -310,9 +299,9 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
                         c_toLEDs <: OFF;
                     }
 
-                    // SEND SIGNAL TO PROCESS ANOTHER ROUND.
-                    c_toSlave[0] <: CARRYON;
-                    c_toSlave[1] <: CARRYON;
+                    // SEND SIGNAL TO DISTRIBUTORS PROCESS ANOTHER ROUND.
+                    c_toSlave[0] <: CONTINUE;
+                    c_toSlave[1] <: CONTINUE;
 
                     // RECEIVE NEW EDGES FROM EACH DISTRIBUTOR.
                     for (int y = 0; y < IMHT; y++) {
@@ -322,7 +311,7 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
                         c_toSlave[1] :> edges[3][y];
                     }
 
-                    // PASS NEW EDGES RECEIVED FROM ON DISTRIBUTOR TO THE OTHER.
+                    // PASS NEW EDGES RECEIVED FROM ONE DISTRIBUTOR TO THE OTHER.
                     for (int y = 0; y < IMHT; y++) {
                         c_toSlave[0] <: edges[3][y];
                         c_toSlave[0] <: edges[2][y];
@@ -333,10 +322,10 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
                     current = getCurrentTime();
                     rounds++;
                     printf("ROUND %d COMPLETE\n\n", rounds);
-                }
-                else {
-                    c_toLEDs <: OFF;
-                }
+                //}
+                //else {
+                //    c_toLEDs <: OFF;
+                //}
                 break;
         }
     }
@@ -346,11 +335,30 @@ void masterDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, ch
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
-// Distributor that farms out parts of its half of the image to worker threads who
+// Counts the number of live cells in an slave distributor image.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+int countLiveCells(uchar image[IMWD/2 + 2][IMHT]) {
+    int count = 0;
+    for (int y = 0; y < IMHT; y++) {
+        // Skip the first and last columns as they are edges provided for info only.
+        for (int x = 1; x < (IMWD/2 + 1); x++) {
+            if (image[x][y] == 255) {
+                count ++;
+            }
+        }
+    }
+    return count;
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Slave Distributor that farms out parts of its half of the image to worker threads who
 // process the image according to the rules of the Game of Life!
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_fromMaster, chanend c_toWorker[n], unsigned n, int distNum) {
+void slaveDistributor(chanend c_fromMaster, chanend c_toWorker[n], unsigned n, int distNum) {
     uchar image[IMWD/2 + 2][IMHT];     // The whole image being processed.
     uchar newImage[IMWD/2 + 2][IMHT];  // The whole image being processed.
     uchar pixel;                       // A single pixel being sent to a worker.
@@ -362,7 +370,7 @@ void distributor(chanend c_fromMaster, chanend c_toWorker[n], unsigned n, int di
             c_fromMaster :> image[x][y];
         }
     }
-    // Read in the edges from MasterDistributor.
+    // Read in the overlapping edges from MasterDistributor.
     for (int y = 0; y < IMHT; y++) {
         c_fromMaster :> image[0][y];
         c_fromMaster :> image[distWD-1][y];
@@ -374,34 +382,34 @@ void distributor(chanend c_fromMaster, chanend c_toWorker[n], unsigned n, int di
     int running = 1;
     while (running) {
 
-        // SEGHT rows are sent to a worker at a time to analyse (FARMING PARALLELISM).
-
-        // SENDING THE INITIAL ROWS TO EACH WORKER.
-        int y = 0;             // Row reference.
-        int w = 0;             // The worker receiving a pixel.
-        int segmentsSent = 0;  // Total number of image segments sent to the workers.
-
-        while (w < WORKERS/2) {
-            for (int y2 = 0; y2 < SEGHT + 2; y2++) {
-                for (int x = 0; x < distWD; x++) {
-                    pixel = image[x][(((y + IMHT) - 1) % IMHT)];
-                    c_toWorker[w] <: pixel;
-                }
-                if (y2 == 0) {
-                    workerRow[w] = y;
-                }
-                y++;
-            }
-            segmentsSent++;
-            w++;
-            y -= 2;
-            if (y == IMHT) break;
-        }
-
-        int signal;
+        int signal;  // Signal received from the MasterDistributor advising what to do next.
         c_fromMaster :> signal;
         // Process another round.
-        if (signal == CARRYON) {
+        if (signal == CONTINUE) {
+            // SEGHT rows are sent to a worker at a time to analyse (FARMING PARALLELISM).
+
+            // SENDING THE INITIAL ROWS TO EACH WORKER.
+            int y = 0;             // Row reference.
+            int w = 0;             // The worker receiving a pixel.
+            int segmentsSent = 0;  // Total number of image segments sent to the workers.
+
+            while (w < WORKERS/2) {
+                for (int y2 = 0; y2 < SEGHT + 2; y2++) {
+                    for (int x = 0; x < distWD; x++) {
+                        pixel = image[x][(((y + IMHT) - 1) % IMHT)];
+                        c_toWorker[w] <: pixel;
+                    }
+                    if (y2 == 0) {
+                        workerRow[w] = y;
+                    }
+                    y++;
+                }
+                segmentsSent++;
+                w++;
+                y -= 2;
+                if (y == IMHT) break;
+            }
+
             // RECEIVING UPDATES AND FARMING OUT MORE ROWS.
             int segmentsReceived = 0;
             while (segmentsReceived < IMHT / SEGHT) {
@@ -442,7 +450,7 @@ void distributor(chanend c_fromMaster, chanend c_toWorker[n], unsigned n, int di
                 c_fromMaster <: newImage[1][y];
                 c_fromMaster <: newImage[distWD-2][y];
             }
-            // Receive new edges from other distributor via master distributor.
+            // Receive new edges from other distributor via MasterDistributor.
             for (int y = 0; y < IMHT; y++) {
                 c_fromMaster :> newImage[0][y];
                 c_fromMaster :> newImage[distWD-1][y];
@@ -451,10 +459,18 @@ void distributor(chanend c_fromMaster, chanend c_toWorker[n], unsigned n, int di
             memcpy(image, newImage, sizeof(uchar) * IMHT * distWD);
 
         }
+
+        // Pause processing and send back the number of live cells in the current image.
+        else if (signal == PAUSE) {
+            c_fromMaster <: countLiveCells(image);
+            c_fromMaster :> int goSignal;
+        }
+
         // Stop processing rounds and send back the current image.
         else if (signal == STOP) {
-            printf("[%d]Dist told to STOP!\n", distNum);
+            c_fromMaster <: countLiveCells(image);
             for (int y = 0; y < IMHT; y++) {
+                // Skip the first and last columns as they are edges provided for info only.
                 for (int x = 1; x < distWD-1; x++) {
                     c_fromMaster <: image[x][y];
                 }
@@ -542,8 +558,8 @@ void waitForSeconds(unsigned int seconds) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend c_fromDist) {
     uchar image[IMWD/2 + 2][SEGHT + 2];  // The segment of the whole image that the worker will process.
-    uchar pixel;                          // A single pixel in the image.
-    int segWD = IMWD/2 + 2;
+    uchar pixel;                         // A single pixel in the image.
+    int segWD = IMWD/2 + 2;              // Width of a worker image segment.
 
     while (1) {
 
@@ -560,9 +576,9 @@ void worker(chanend c_fromDist) {
         //waitForSeconds(1);
 
         // ANALYSE IMAGE SEGMENT FOR POTENTIAL CHANGES FOR NEXT ROUND.
-        // Skip the top and bottom rows as they are boundaries provided for info only.
+        // Skip the top and bottom rows as they are edges provided for info only.
         for (int y = 1; y < SEGHT + 1; y++) {
-            // Skip the first and last columns as they are boundaries provided for info only.
+            // Skip the first and last columns as they are edges provided for info only.
             for (int x = 1; x < segWD-1; x++) {
                 // Check the number of surrounding alive cells.
                 int count = aliveSurroundingCells(x, y, image);
@@ -688,8 +704,8 @@ int main(void) {
 
         // DISTRIBUTOR THREADS: Threads to coordinate work on image (image processes much faster if on same tile as workers).
         on tile[0]: masterDistributor(c_buttonsToDist, c_DistToLEDs, c_inIO, c_outIO, c_control, c_masterToSlave);
-        on tile[0]: distributor(c_masterToSlave[0], c_workersZero, WORKERS/2, 0);
-        on tile[1]: distributor(c_masterToSlave[1], c_workersOne, WORKERS/2, 1);
+        on tile[0]: slaveDistributor(c_masterToSlave[0], c_workersZero, WORKERS/2, 0);
+        on tile[1]: slaveDistributor(c_masterToSlave[1], c_workersOne, WORKERS/2, 1);
 
         // WORKER THREADS: Threads to do work on an image.
         par (int i = 0; i < WORKERS/2; i++) {
