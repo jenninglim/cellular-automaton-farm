@@ -14,7 +14,7 @@
 #define SPLITWIDTH 2
 #define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
 
-#define NUMBEROFWORKERS 2         //number of workers
+#define NUMBEROFWORKERS 3         //number of workers
 #define NUMBEROFSUBDIST 2   //number of subdistributors.
 
 // Port to access xCORE-200 buttons.
@@ -256,84 +256,70 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 break;
             case fromAcc :> pause:
                 //Send signal to distributor.
-                break; /*
+                break;
             case c_subDist[int i] :> val:
-
-                //tells subDistributors to pause (or not).
                 aliveCells = aliveCells + val;
 
-                if (pause == 0) { c_subDist[i] <: 1; }// change this from to 1 (for debug)
-                else if (pause == 1) {  c_subDist[i] <: 1; printf("here1\n"); }
-                if (i == 0) { //leftmost subDist is ready.
-                    leftDone = 1;
-                } else { //rightmost subDist is ready.
-                    rightDone = 1;
-                }
-                printf("here2\n");
+                //wait for other subDist
+                c_subDist[(i + 1) % 2] :> val;
 
-                if (rightDone + leftDone == 0) {
-                    aliveCells = 0; //reset alive cells at the end of each round.
-                    for (int i = 0; i < 4; i++) { //initialise edges to 0.
-                        edges[i] = 0;
-                    }
+                aliveCells = aliveCells + val;
+
+                if (pause == 0) { c_subDist[1] <: 0; c_subDist[0] <: 0; }// change this from to 1 (for debug)
+                else if (pause == 1) {  c_subDist[0] <: 1; c_subDist[1] <: 1; }
+
+
+                aliveCells = 0; //reset alive cells at the end of each round.
+                for (int i = 0; i < 4; i++) { //initialise edges to 0.
+                    edges[i] = 0;
                 }
 
-                printf("here3\n");
-                // if not pause assign edges
-                if (pause != 0) {
-
-
-                }
-                if (rightDone + leftDone == 2) { //when both sub distributors are ready.
-                    if (pause == 0) { //assign edges
-                        for (int i = 0; i < IMHT; i ++ ){
-                            for (int j = 0; j < 4; j++ ) {// receiving edges
-                                select {
-                                   case c_subDist[int l] :> uint32_t edge:
-                                       uchar k = 0;
-                                       uchar m = 2;
-                                       if (l == 0) {
-                                           edges[k] = edge;
-                                           k ++;
-                                       }
-                                       else {
-                                           edges[m] = edge;
-                                           m ++;
-                                       }
-                                       break;
-                                 }
-                             }
-                             edges[3] = assignRightEdge(edges[3],length, edges[0]);
-                             edges[0] = assignLeftEdge(edges[3], 30,  edges[0]);
-                             edges[1] = assignRightEdge(edges[1], 30, edges[2]);
-                             edges[2] = assignLeftEdge(edges[1], 30, edges[2]);
-                             for (int j = 0; j < 2; j ++) {
-                                 c_subDist[0] <: edges[j];
-                                 c_subDist[0] <: edges[j+2];
-                             }
-                         }
-                         rightDone = 0;
-                         leftDone = 0;
-                         printf("done\n");
-                    }
-
-                    if (pause == 1) {//recieve picture.
-                        for (int i = 0; i < IMHT; i ++) {
-                            for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
-                                if (j < SPLITWIDTH) {
-                                    c_subDist[0] :> val;
-                                    printBinary(val,30);
-                                } else {
-                                    c_subDist[0] :> val;
-                                    printBinary(val,30);
-                                }
-                            }
-                            printf("\n");
-                        }
-                    }
-                }
-
-                break; */
+                if (pause == 0) { //assign edges
+                                        for (int i = 0; i < IMHT; i ++ ){
+                                            for (int j = 0; j < 4; j++ ) {// receiving edges
+                                                select {
+                                                   case c_subDist[int l] :> uint32_t edge:
+                                                       uchar k = 0;
+                                                       uchar m = 2;
+                                                       if (l == 0) {
+                                                           edges[k] = edge;
+                                                           k ++;
+                                                       }
+                                                       else {
+                                                           edges[m] = edge;
+                                                           m ++;
+                                                       }
+                                                       break;
+                                                 }
+                                             }
+                                             edges[3] = assignRightEdge(edges[3],length, edges[0]);
+                                             edges[0] = assignLeftEdge(edges[3], 30,  edges[0]);
+                                             edges[1] = assignRightEdge(edges[1], 30, edges[2]);
+                                             edges[2] = assignLeftEdge(edges[1], 30, edges[2]);
+                                             for (int j = 0; j < 2; j ++) {
+                                                 c_subDist[0] <: edges[j];
+                                                 c_subDist[0] <: edges[j+2];
+                                             }
+                                         }
+                                         rightDone = 0;
+                                         leftDone = 0;
+                                         printf("done\n");
+                                    }
+                                    if (pause == 1) {//recieve picture.
+                                        for (int i = 0; i < IMHT; i ++) {
+                                            for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
+                                                if (j < SPLITWIDTH) {
+                                                    c_subDist[0] :> val;
+                                                    printBinary(val,30);
+                                                } else {
+                                                    c_subDist[1] :> val;
+                                                    printBinary(val,30);
+                                                }
+                                            }
+                                            printf("\n");
+                                        }
+                                    }
+                break;
 
         }
     }
@@ -351,11 +337,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 {
   uint32_t linePart[SPLITWIDTH][IMHT]; //stores processing image
   uint32_t copyPart[SPLITWIDTH][IMHT]; //stores results.
-
-  uchar safe = 0; // safe to send to workers
-  uchar pause = 0; // boolean for pause state
   uchar readIn = 1; //boolean for reading in files.
-  uchar nextTurn = 0; //boolean for next Turn
+  uchar safe = 0; // safe to send to workers
+
+  uchar distColsReceived = 0;   //number of columns received from the distributor.
+  uchar distRowsReceived = 0;  //numbers of rows received from the distributor
 
   uint32_t actualWidth = 0; // actual width of the array used.
   uint32_t val = 0;
@@ -367,23 +353,23 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
    */
   uchar index[NUMBEROFWORKERS][2];
 
+  uchar pause = 0; // boolean for pause state
+  uchar nextTurn = 0; //boolean for next Turn
+
+  uchar workerColsReceived = 0;
+  uchar workerRowsReceived = 0;
+
+  uchar workerColsSent = 0; //number of columns sent to the worker. l
+  uchar workerRowsSent = 0; //number of rows sent to the worker. k
+
+  uchar workersStarted = 0; //number of workers starting to work
+
   //initialise array
   for (int i = 0; i < NUMBEROFWORKERS; i ++) {
       for (int j = 0; j < 2; j ++) {
           index[i][j] = 0;
       }
   }
-
-  uchar workerColsReceived = 0;
-  uchar workerRowsReceived = 0;
-
-  uchar distColsReceived = 0;   //number of columns received from the distributor.
-  uchar distRowsReceived = 0;  //numbers of rows received from the distributor
-
-  uchar workerColsSent = 0; //number of columns sent to the worker. l
-  uchar workerRowsSent = 0; //number of rows sent to the worker. k
-
-  uchar workersStarted = 0;
 
   //Getting actual width from main dsitributor
   c_in :> actualWidth;
@@ -414,13 +400,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       if (distRowsReceived == IMHT) { safe = 1;  }
       //else if (workerRowsSent + 3 <= distRowsReceived && distRowsReceived < IMHT) { safe = 1; }
       else { safe = 0; }
-      /*
-      if (safe) {
-          printf("safe\n");
-      }
-      else {
-          printf("unsafe\n");
-      }*/
       select {
         //case when receiving from the (main distributor).
         case c_in :> val:
@@ -451,11 +430,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                 index[i][1] = workerRowsSent % IMHT;
                 workerColsSent ++;
                 if (workerColsSent % actualWidth == 0) { workerRowsSent ++; }
-
             }
             break;
         default:
             if (nextTurn){
+
                 /*for debug
                 if (actualWidth == 2) {
 
@@ -476,26 +455,16 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     }
 
                 } */
-
-
-                /*
-                 * actual code
                 //letting distributor know (this) is ready
+
                 c_in <: 1;
-                printf("here11\n");
                 c_in :> val;
                 if (val == 1) { pause = 1; }
                 else { pause = 0; }
-                printf("here22\n");
                 //send edges cases when not paused.
+
                 if (pause == 0) {
                     printf( "\nOne processing round completed...\n" );
-                    for (int i = 0; i < IMHT; i++) {
-                        for (int j = 0; j < actualWidth ; j++) {
-                            printBinary(copyPart[j][i], 16);
-                        }
-                    }
-                    c_in <: 1; //signalling done...
                     //logic for sending edges
                     for (int i = 0; i < IMHT; i++){
                         for (int j = 0; j < actualWidth; j++) {
@@ -503,7 +472,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                                 linePart[j][i] = assignRightEdge(copyPart[j][i],30,copyPart[j + 1][i]);
                             }
                             if (j > 0) {
-                                linePart[j][i] = assignLeftEdge(copyPart[j - 1][i], copyPart[j][i]);
+                                linePart[j][i] = assignLeftEdge(copyPart[j - 1][i], 30, copyPart[j][i]);
                             }
                         }
                         c_in <: linePart[0][i];
@@ -514,15 +483,19 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                         //reset variables??
                     }
                 }
+
                 //send image to main distributor.
                 if (pause) {
                     for (int i = 0; i < IMHT; i ++) {
                         for (int j = 0; j < actualWidth; j ++) {
-                            c_in <: linePart[j][i];
+                            c_in <: copyPart[j][i];
                         }
                     }
-                } */
+                }
+                // reset variables
+                nextTurn = 0;
             }
+
             break;
       }
   }
@@ -688,9 +661,9 @@ chan c_subDist[NUMBEROFSUBDIST];
 
 par {
     on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
-    on tile[0]: orientation(i2c[0],c_control);        //client thread reading orientation data
-    on tile[0]: DataInStream(infname, c_inIO, c_buttonsToData);          //thread to read in a PGM image
-    on tile[0]: DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
+    on tile[1]: orientation(i2c[0],c_control);        //client thread reading orientation data
+    on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData);          //thread to read in a PGM image
+    on tile[1]: DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
     on tile[1]: mainDistributor(c_buttonsToDist, c_DistToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);
     on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);//thread to coordinate work on image
     on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
