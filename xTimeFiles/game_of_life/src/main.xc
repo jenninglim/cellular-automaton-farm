@@ -9,13 +9,13 @@
 
 #define IMHT 16    // Image height.
 #define IMWD 16    // Image width.
-#define SEGHT 4   // Height of a farming segment.
+#define SEGHT 4   // Number of rows to analyse in each farmed segment.
 
-#define MAX_ROUNDS 2  // Maxiumum number of rounds to be processed.
+#define MAX_ROUNDS 2  // Maxiumum number of rounds to be processed (uncomment relevant if statement in Master Distributor).
 
 #define WORKERS 4  // Total number of workers processing the image (must be an even number).
 
-// Signals sent between Master and Slave Distributors.
+// Signals sent from Master to Slave Distributors.
 #define CONTINUE 0
 #define PAUSE    1
 #define STOP     2
