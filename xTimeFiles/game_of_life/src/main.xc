@@ -218,7 +218,8 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons)
 
 void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
-    uchar pause = 1; //this needs changing
+    uchar pause = 0; //this needs changing
+    uchar turn = 0;
     uchar aliveCells = 0;
     uchar rightDone = 0;
     uchar leftDone = 0;
@@ -262,7 +263,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
 
                 //wait for other subDist
                 c_subDist[(i + 1) % 2] :> val;
-
+                turn++ ;
                 aliveCells = aliveCells + val;
 
                 if (pause == 0) { c_subDist[1] <: 0; c_subDist[0] <: 0; }// change this from to 1 (for debug)
@@ -275,50 +276,53 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 }
 
                 if (pause == 0) { //assign edges
-                                        for (int i = 0; i < IMHT; i ++ ){
-                                            for (int j = 0; j < 4; j++ ) {// receiving edges
-                                                select {
-                                                   case c_subDist[int l] :> uint32_t edge:
-                                                       uchar k = 0;
-                                                       uchar m = 2;
-                                                       if (l == 0) {
-                                                           edges[k] = edge;
-                                                           k ++;
-                                                       }
-                                                       else {
-                                                           edges[m] = edge;
-                                                           m ++;
-                                                       }
-                                                       break;
-                                                 }
-                                             }
-                                             edges[3] = assignRightEdge(edges[3],length, edges[0]);
-                                             edges[0] = assignLeftEdge(edges[3], 30,  edges[0]);
-                                             edges[1] = assignRightEdge(edges[1], 30, edges[2]);
-                                             edges[2] = assignLeftEdge(edges[1], 30, edges[2]);
-                                             for (int j = 0; j < 2; j ++) {
-                                                 c_subDist[0] <: edges[j];
-                                                 c_subDist[0] <: edges[j+2];
-                                             }
-                                         }
-                                         rightDone = 0;
-                                         leftDone = 0;
-                                         printf("done\n");
-                                    }
-                                    if (pause == 1) {//recieve picture.
-                                        for (int i = 0; i < IMHT; i ++) {
-                                            for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
-                                                if (j < SPLITWIDTH) {
-                                                    c_subDist[0] :> val;
-                                                    printBinary(val,30);
-                                                } else {
-                                                    c_subDist[1] :> val;
-                                                    printBinary(val,30);
-                                                }
-                                            }
-                                            printf("\n");
-                                        }
-                                    }
+                    for (int i = 0; i < IMHT; i ++ ){
+                        for (int j = 0; j < 4; j++ ) {// receiving edges
+                            select {
+                               case c_subDist[int l] :> uint32_t edge:
+                                   uchar k = 0;
+                                   uchar m = 2;
+                                   if (l == 0) {
+                                       edges[k] = edge;
+                                       k ++;
+                                   }
+                                   else {
+                                       edges[m] = edge;
+                                       m ++;
+                                   }
+                                   break;
+                             }
+                         }
+                         edges[3] = assignRightEdge(edges[3],length, edges[0]);
+                         edges[0] = assignLeftEdge(edges[3], 30,  edges[0]);
+                         edges[1] = assignRightEdge(edges[1], 30, edges[2]);
+                         edges[2] = assignLeftEdge(edges[1], 30, edges[2]);
+                         for (int j = 0; j < 2; j ++) {
+                             c_subDist[0] <: edges[j];
+                             c_subDist[0] <: edges[j+2];
+                         }
+                     }
+                     rightDone = 0;
+                     leftDone = 0;
+                     printf("done\n");
+                }
+
+                if (pause == 1) {//recieve picture for debug purposes.
+                    for (int i = 0; i < IMHT; i ++) {
+                        for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
+                            length = 30;
+                            if (j == UINTARRAYWIDTH - 1) { length = IMWD % 30; }
+                            if (j < SPLITWIDTH) {
+                                c_subDist[0] :> val;
+                                printBinary(val,length);
+                            } else {
+                                c_subDist[1] :> val;
+                                printBinary(val,length);
+                            }
+                        }
+                        printf("\n");
+                    }
+                }
                 break;
 
         }
@@ -356,8 +360,8 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   uchar pause = 0; // boolean for pause state
   uchar nextTurn = 0; //boolean for next Turn
 
-  uchar workerColsReceived = 0;
-  uchar workerRowsReceived = 0;
+  uchar workerColsReceived = 0; //number of columns received from workers
+  uchar workerRowsReceived = 0; //number of rows received from workers
 
   uchar workerColsSent = 0; //number of columns sent to the worker. l
   uchar workerRowsSent = 0; //number of rows sent to the worker. k
@@ -434,29 +438,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
             break;
         default:
             if (nextTurn){
-
-                /*for debug
-                if (actualWidth == 2) {
-
-                    for (int i = 0; i < IMHT; i++) {
-                        for (int j = 0; j < actualWidth; j ++) {
-                            printBinary(linePart[j][i], 30);
-                        }
-                        printf("\n");
-                    }
-                    printf("\n");
-
-                    printf("\n");
-                    for (int i = 0; i < IMHT; i++) {
-                        for (int j = 0; j < actualWidth; j ++) {
-                            printBinary(copyPart[j][i], 30);
-                        }
-                        printf("\n");
-                    }
-
-                } */
                 //letting distributor know (this) is ready
-
                 c_in <: 1;
                 c_in :> val;
                 if (val == 1) { pause = 1; }
@@ -477,10 +459,8 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                         }
                         c_in <: linePart[0][i];
                         c_in <: linePart[actualWidth - 1][i];
-                        c_in :>linePart[0][i];
+                        c_in :> linePart[0][i];
                         c_in :> linePart[actualWidth - 1][i];
-
-                        //reset variables??
                     }
                 }
 
@@ -492,8 +472,13 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                         }
                     }
                 }
-                // reset variables
+                // reset variables for next turn.
                 nextTurn = 0;
+                workerColsReceived = 0;
+                workerRowsReceived = 0;
+                workerColsSent = 0;
+                workerRowsSent = 0;
+                workersStarted = 0;
             }
 
             break;
