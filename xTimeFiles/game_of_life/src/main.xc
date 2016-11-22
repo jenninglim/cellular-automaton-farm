@@ -54,7 +54,7 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 
 // Image paths.
 char infname[] = "64x64.pgm";      // Input image path
-char outfname[] = "64x64out.pgm";  // Output image path
+char outfname[] = "64x64out(1).pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -274,43 +274,49 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     // SENDING THE IMAGE TO THE WORKERS.
                     // The image is split vertically (GEOMETRIC PARALLELISM).
                     for (int y = 0; y < IMHT; y++) {
-                        int fst = 0;  // Segment FIRST row counter.
+                        int fst = 1;  // Segment FIRST row counter.
                         int lst = 1;  // Segment LAST row counter.
 
-                        for (int x = 0; x < IMWD; x++) {
-                            pixel = image[x][y];  // A single pixel in the image.
+                        for (int x = 0; x < IMWD+2; x++) {
+                            //pixel = image[x][y];  // A single pixel in the image.
+                            pixel = image[(((x + IMWD) - 1) % IMWD)][y];
 
                             // When only a single worker, send the pixels in sequence to the single worker.
-                            if (WORKERS == 1) {
-                                c_toWorker[0] <: pixel;
-                            }
+                            //if (WORKERS == 1) {
+                            //    c_toWorker[0] <: pixel;
+                            //}
 
                             // When more than 1 worker, the boundaries between worker segments need sending to multiple workers.
-                            else {
+                            //else {
                                 // First row of each worker segment.
-                                if (x % (IMWD / WORKERS) == 0) {
+                                if ((x != IMWD+1) && (x!= 1) && ((x-1) % (IMWD / WORKERS) == 0)) {
                                     c_toWorker[((fst-1) + WORKERS) % WORKERS] <: pixel;
                                     c_toWorker[( fst    + WORKERS) % WORKERS] <: pixel;
+                                    printf("(%d,%d) -> [%d] & [%d]\n", x, y, ((fst-1) + WORKERS) % WORKERS, (fst + WORKERS) % WORKERS);
                                     fst++;
                                 }
                                 // Last row of each worker segment.
-                                else if ((x+1) % (IMWD / WORKERS) == 0) {
+                                else if ((x!=0) && (x!=IMWD) && (x % (IMWD / WORKERS) == 0)) {
                                     c_toWorker[((lst-1) + WORKERS) % WORKERS] <: pixel;
                                     c_toWorker[( lst    + WORKERS) % WORKERS] <: pixel;
+                                    printf("(%d,%d) -> [%d] & [%d]\n", x, y, ((lst-1) + WORKERS) % WORKERS, (lst + WORKERS) % WORKERS);
                                     lst++;
                                 }
                                 // Remainging non-boundary pixels then split between the workers.
                                 else {
                                     for (int i = 0; i < WORKERS; i++) {
-                                        if (x < (i+1)*IMWD/WORKERS) {
+                                        if (x < ((i+1)*IMWD/WORKERS)) {
                                             c_toWorker[i] <: pixel;
+                                            printf("(%d,%d) -> [%d]\n", x, y, i);
                                             break;
                                         }
                                     }
                                 }
-                            }
+                            //}
                         }
+
                     }
+                    printf("here?\n");
 
                     // RECEIVING UPDATES FROM THE WORKERS.
                     int x[WORKERS];  // Each workers x coordinate to update in the new image.
@@ -337,6 +343,9 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     }
                     current = getCurrentTime();
                     rounds++;
+                }
+                else {
+                    c_toLEDs <: OFF;
                 }  // END OF MAX_ROUNDS IF STATEMENT.
                 break;
         }
@@ -409,7 +418,13 @@ void worker(chanend c_fromDist, int workerType) {
 
     while (1) {
 
-        // READ IN IMAGE SEGMENT FROM DISTRIBUTOR.
+        for (int y = 0; y < IMHT; y++) {
+            for (int x = 0; x < segWD; x++) {
+                c_fromDist :> pixel;
+                image[x][y] = pixel;
+            }
+        }
+        /* READ IN IMAGE SEGMENT FROM DISTRIBUTOR.
         // Worker that processes the image all on its own!
         if (workerType == SINGLE) {
             for (int y = 0; y < IMHT; y++) {
@@ -464,7 +479,7 @@ void worker(chanend c_fromDist, int workerType) {
                     }
                 }
             }
-        }
+        }*/
 
         // ANALYSE IMAGE SEGMENT FOR POTENTIAL CHANGES FOR NEXT ROUND.
         for (int y = 0; y < IMHT; y++) {
