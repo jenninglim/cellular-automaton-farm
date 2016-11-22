@@ -8,8 +8,8 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 16                  //image height
+#define  IMWD 16                  //image width
 //the variables below must change when image size changes
 #define SPLITWIDTH 2
 #define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
@@ -312,6 +312,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
         select {
             case c_fromButtons :> buttonPressed: //export state
                 if (buttonPressed == SW2) { //Export state.
+                    printf("STOP\n");
                     state = STOP;
                 }
                 //recieve data from distributors
@@ -334,7 +335,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 turn++ ; //increment turn.
                 aliveCells = aliveCells + val;
 
-                if (turn == 2 ) { state = 1; }
+                if (turn == 100 ) { state = 2; }
 
                 //sending the pause state to distributor.
                 if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; }
@@ -384,12 +385,14 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                                 else { c_subDist[1] :> val; }
 
                                 //splitting uint32_t into its constituent bits.
-                                for (int l = 0 ; l < length ; l ++) {
+                                for (int l = 1 ; l < length + 1 ; l ++) {
                                     c_out <: getBit(val, l);
                                 }
                             }
                         }
-                        printf("\n");
+                        if (state == PAUSE) {
+                            printf("\n");
+                        }
                     }
 
                     c_subDist[0] :> val;
@@ -461,7 +464,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
-  while (1) {
+  while (state != STOP) {
       if (distRowsReceived == IMHT) { readIn = 0; } //finished readIn!
       if (workerRowsSent == IMHT && workerRowsReceived == IMHT) { nextTurn = 1; } //next turn!!
 
@@ -479,11 +482,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
       // various conditions for "safety"
       //Various if conditions for unsafe working of worker.
-      if (readIn) {
+      if (readIn) { /*
           if (workerRowsSent + 2 < distRowsReceived ) {
               safe = 1;
           }
-          else { safe = 0; }
+          else { safe = 0; } */
       }
       else { safe = 1; }
 
@@ -538,7 +541,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                         for (int j = 0; j < actualWidth; j++) {
                             linePart[j][i] = copyPart[j][i];
                             uchar length = 30;
-                            if (j == actualWidth -1) {
+                            if (actualWidth < SPLITWIDTH && j == actualWidth - 1) {
                                 length = IMHT % 30;
                             }
                             if (j  < actualWidth - 1) {
@@ -554,6 +557,23 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                         c_in <: linePart[actualWidth - 1][i];
                         c_in :> linePart[0][i];
                         c_in :> linePart[actualWidth - 1][i];
+                    }
+                }
+                else {
+                    for (int i = 0; i < IMHT; i ++) {
+                        for (int j = 0; j < actualWidth; j ++) {
+                            length = 30;
+                            if (j == actualWidth -1 ) {
+                                length = IMWD % 30;
+                            }
+                            if (state == PAUSE) {
+                                c_in <: copyPart[j][i]; // for debug sending image to be printed.
+                            }
+                            else if (state == STOP){ // if end send image to be printed.
+                                c_in <: copyPart[j][i];
+                            }
+                            aliveCells = aliveCells + numberOfAliveCells(copyPart[j][i], length);
+                        }
                     }
                 }
 
@@ -572,7 +592,9 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     c_in <: aliveCells;
                     c_in :> val;
                     state = val;
+                    //c_in :>
                 }
+
 
                 // reset variables for next turn.
                 nextTurn = 0;
@@ -674,7 +696,6 @@ void DataOutStream(char outfname[], chanend c_in)
       c_in :> bit[0];
       _writeoutline(bit, 1);
     }
-    printf( "DataOutStream: Line written...\n" );
   }
 
   //Close the PGM image
