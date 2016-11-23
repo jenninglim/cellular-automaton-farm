@@ -199,6 +199,7 @@ uint32_t assignLeftEdge(uint32_t left, uchar leftLength, uint32_t middle) {
  */
 uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
     uint32_t val = middle;
+    printf("Bitshifttest\n%d\n%d\n\n",0x00000001,0x00000001);
     if (getBit(right,1) == 255) {
         val = val | 0x00000001 << (30 - midLength);
         val = val | 0x00000001;
