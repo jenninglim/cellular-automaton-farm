@@ -8,12 +8,12 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 128                  //image height
+#define  IMWD 128                  //image width
 //the variables below must change when image size changes
-#define SPLITWIDTH 2
-#define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
-
+#define SPLITWIDTH 3                //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 5            //ceil(IMWD / 30)
+#define RUNUNTIL 1                  //for debug
 //Number of ...
 #define NUMBEROFWORKERS 3         //Workers
 #define NUMBEROFSUBDIST 2   //Sub-Distributors.
@@ -254,19 +254,19 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons)
 
       //assign edges values to each row.
       for (int i = 0; i < UINTARRAYWIDTH; i++ ) {
+          //assign right edge
           length = 30;
           if (i + 1 == UINTARRAYWIDTH) {
               length = IMWD % 30;
           }
           row[i] = assignRightEdge(row[i], length, row[ (i + 1) % UINTARRAYWIDTH]);
-
-      }
-      for (int i = 0; i < UINTARRAYWIDTH; i++ ) {
           length = 30;
+
+          //assign left edge
           if ((i - 1 + UINTARRAYWIDTH) % UINTARRAYWIDTH == UINTARRAYWIDTH - 1) {
               length = IMWD % 30;
           }
-          row[i] = assignLeftEdge(row[(i-1+UINTARRAYWIDTH) % UINTARRAYWIDTH], length, row[i]);
+          row[i] = assignLeftEdge(row[(i- 1 + UINTARRAYWIDTH) % UINTARRAYWIDTH], length, row[i]);
           c_out <: row[i];
       }
   }
@@ -319,7 +319,6 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 break;
 
             case fromAcc :> val:
-                printf("detected state change\n");
                 if (val == 1) { state = 1; }
                 else if ( val == 0 ) { state = 0; }
                 break;
@@ -335,7 +334,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 turn++ ; //increment turn.
                 aliveCells = aliveCells + val;
 
-                if (turn == 100 ) { state = 2; }
+                if (turn == RUNUNTIL ) { state = 2; }
 
                 //sending the pause state to distributor.
                 if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; }
@@ -482,11 +481,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
       // various conditions for "safety"
       //Various if conditions for unsafe working of worker.
-      if (readIn) { /*
+      if (readIn) {
           if (workerRowsSent + 2 < distRowsReceived ) {
               safe = 1;
           }
-          else { safe = 0; } */
+          else { safe = 0; }
       }
       else { safe = 1; }
 
@@ -497,14 +496,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                 linePart[distColsReceived % actualWidth][distRowsReceived] = val;
                 distColsReceived ++;
                 if (distColsReceived % actualWidth == 0) { distRowsReceived ++; } //increment height when i goes over the "edge";
-            }
-            else if (nextTurn == 0) {
-                if (val == 0) {
-                    state = PAUSE;
-                }
-                else if (val == 1) {
-                    state = CONTINUE;
-                }
             }
             break;
 
