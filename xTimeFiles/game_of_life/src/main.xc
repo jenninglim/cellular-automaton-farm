@@ -288,6 +288,7 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
       }
   }
 
+  c_toLEDs <: OFF;  // Turn OFF the green LED to indicate reading of the image has FINISHED.
 
   //Close PGM image file
   _closeinpgm();
@@ -298,7 +299,7 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
 
 void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
-    double start;           // Start time for processing.
+    double start;          // Start time for processing.
     double current;         //time after processing a round.
     uchar state = 0;        //Signal to the sub distributors the state of the farm.
     int turn = 1;           //turn number
@@ -324,6 +325,8 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
             }
         }
     }
+    //records the current time.
+    start = getCurrentTime();
 
     while (1) {
         select {
@@ -341,41 +344,44 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 break;
 
             case c_subDist[int i] :> val:
+                c_toLEDs <: OFF;
                 //reseting variables.
-                aliveCells = 0;
                 for (int i = 0; i < 4; i++) { edges[i] = 0; }
-
-                aliveCells = aliveCells + val;
                 c_subDist[(i + 1) % 2] :> val; //wait for other subDist
-                printf( "\nRound %d completed...\n", turn);
-                aliveCells = aliveCells + val;
-                turn++ ; //increment turn.
+                current = getCurrentTime();
+                //printf( "\nRound %d completed...\n", turn);
 
-                if (turn == RUNUNTIL ) { state = STOP; }
+                if (turn == RUNUNTIL ) { state = STOP; } //for debug
 
                 //sending the automaton state to distributor.
-                if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; }
-                else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; }
-                else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; }
+                if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; c_toLEDs <: GRNS; }
+                else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; c_toLEDs <: RED;  }
+                else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; c_toLEDs <: BLU;  } // Turn ON the blue LED to indicate export of the image has STARTED.
 
                 //if CONTINUE, receive images edges from sub distributor to be assigned edges.
                 if (state == CONTINUE) {
+                    turn++ ; //increment turn.
+                    c_toLEDs <: GRNS;
                     for (int i = 0; i < IMHT; i ++ ){
-                        //receiving edges
+                        //receiving edges.
                         c_subDist[0] :> edges[0];
                         c_subDist[0] :> edges[1];
                         c_subDist[1] :> edges[2];
                         c_subDist[1] :> edges[3];
+
                         //assigning edges
                         edges[3] = assignRightEdge(edges[3],IMHT % 30, edges[0]);
                         edges[0] = assignLeftEdge(edges[3], IMHT % 30,  edges[0]);
                         edges[1] = assignRightEdge(edges[1], 30, edges[2]);
                         edges[2] = assignLeftEdge(edges[1], 30, edges[2]);
+
+                        //this is an outlier case.
                         if (UINTARRAYWIDTH - SPLITWIDTH == 1) {
                             edges[3] = assignLeftEdge(edges[1], 30, edges[3]);
                             edges[2] = assignRightEdge(edges[2],IMHT % 30, edges[0]);
                         }
 
+                        //sends back to the edges.
                         for (int j = 0; j < 2; j ++) {
                             c_subDist[0] <: edges[j];
                             c_subDist[1] <: edges[j+2];
@@ -388,6 +394,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                             for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
                                 length = 30;
                                 if (j == UINTARRAYWIDTH - 1) { length = IMWD % 30; }
+
                                 //receiving image from distributors to be written out.
                                 if (j < SPLITWIDTH) { c_subDist[0] :> val; }
                                 else { c_subDist[1] :> val; }
@@ -400,7 +407,9 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                             }
                         }
                     }
+                    else if (state == PAUSE) { c_toLEDs <: RED; }  // Turn ON the red LED to indicate that the state is PAUSED
                     //if paused/stop then...
+                    // receive the number of alive cells.
                     c_subDist[0] :> val;
                     aliveCells = val;
                     c_subDist[1] :> val;
@@ -408,6 +417,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
 
                     //print status report.
                     printStatusReport(start, current, turn, aliveCells, state - 1);
+
                     if (state == STOP) { c_toLEDs <: OFF; }  // Turn OFF the green LED to indicate reading of the image has FINISHED.
                 }
                 break;
@@ -512,6 +522,8 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
         case (safe) => c_toWorker[int i] :> copyPart[index[i][0]][index[i][1]]:
                 workerColsReceived++;
                 if (workerColsReceived % actualWidth == 0) { workerRowsReceived ++; }
+
+                //send image to worker to be processed.
                 if (workerRowsSent < IMHT) {
                     for (int x = 0; x < 3 ; x++) {
                         c_toWorker[i] <: linePart[workerColsSent % actualWidth][(workerRowsSent + x + IMHT) % IMHT];
@@ -559,10 +571,10 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     for (int i = 0; i < IMHT; i ++) {
                         for (int j = 0; j < actualWidth; j ++) {
                             length = 30;
-                            if (j == actualWidth -1 ) {
-                                length = IMWD % 30;
-                            }
-                            if (state == STOP){ // if end send image to be printed.
+                            if (j == actualWidth - 1 ) { length = IMWD % 30; }
+
+                            // if end, send the image to DataOutStream.
+                            if (state == STOP){
                                 c_in <: copyPart[j][i];
                             }
                             aliveCells = aliveCells + numberOfAliveCells(copyPart[j][i], length);
@@ -574,6 +586,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                         state = val;
                     }
                 }
+
                 // reset variables for next turn.
                 nextTurn = 0;
                 workerColsReceived = 0;
