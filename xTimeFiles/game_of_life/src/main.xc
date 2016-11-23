@@ -8,12 +8,13 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 128                  //image height
-#define  IMWD 128                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
+
 //the variables below must change when image size changes
-#define SPLITWIDTH 3                //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 5            //ceil(IMWD / 30)
-#define RUNUNTIL 1                  //for debug
+#define SPLITWIDTH 2                //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
+#define RUNUNTIL 2                  //for debug
 //Number of ...
 #define NUMBEROFWORKERS 3         //Workers
 #define NUMBEROFSUBDIST 2   //Sub-Distributors.
@@ -58,8 +59,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
-char infname[] = "test.pgm";     //put your input image path here
-char outfname[] = "testout.pgm"; //put your output image path here
+char infname[] = "64x64.pgm";     //put your input image path here
+char outfname[] = "64x64(4).pgm"; //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -199,7 +200,6 @@ uint32_t assignLeftEdge(uint32_t left, uchar leftLength, uint32_t middle) {
  */
 uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
     uint32_t val = middle;
-    printf("Bitshifttest\n%d\n%d\n\n",0x00000001,0x00000001);
     if (getBit(right,1) == 255) {
         val = val | 0x00000001 << (30 - midLength);
         val = val | 0x00000001;
@@ -285,7 +285,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
     double start;           // Start time for processing.
     double current;         //time after processing a round.
     uchar state = 0;        //Signal to the sub distributors the state of the farm.
-    int turn = 0;           //turn number
+    int turn = 1;           //turn number
     int aliveCells = 0;     //number of live cells at turn
     uchar length = 0;
     uint32_t val;           //read in value.
@@ -335,15 +335,15 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 turn++ ; //increment turn.
                 aliveCells = aliveCells + val;
 
-                if (turn == RUNUNTIL ) { state = 2; }
+                if (turn == RUNUNTIL ) { state = STOP; }
 
-                //sending the pause state to distributor.
+                //sending the automaton state to distributor.
                 if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; }
                 else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; }
                 else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; }
 
-                //if not paused, receive images edges from sub distributor to be assigned edges.
-                if (state == 0) {
+                //if CONTINUE, receive images edges from sub distributor to be assigned edges.
+                if (state == CONTINUE) {
                     for (int i = 0; i < IMHT; i ++ ){
                         //receiving edges
                         c_subDist[0] :> edges[0];
@@ -367,38 +367,30 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                      }
                 }
                 else {
-                    for (int i = 0; i < IMHT; i ++) {
-                        for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
-                            length = 30;
-                            if (j == UINTARRAYWIDTH - 1) { length = IMWD % 30; }
-                            if (state == PAUSE) { // if paused, then ...
-                                if (j < SPLITWIDTH) {
-                                    c_subDist[0] :> val;
-                                    printBinary(val,length);
-                                } else {
-                                    c_subDist[1] :> val;
-                                    printBinary(val,length);
-                                }
-                            }
-                            else if (state == STOP) { // if stop then send data to data out.
+                    if (state == STOP) { //if stop then...
+                        for (int i = 0; i < IMHT; i ++) {
+                            for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
+                                length = 30;
+                                if (j == UINTARRAYWIDTH - 1) { length = IMWD % 30; }
+                                //receiving image from distributors to be written out.
                                 if (j < SPLITWIDTH) { c_subDist[0] :> val; }
                                 else { c_subDist[1] :> val; }
 
-                                //splitting uint32_t into its constituent bits.
+                                //splitting uint32_t into its constituent bits
+                                //sent to be written out.
                                 for (int l = 1 ; l < length + 1 ; l ++) {
                                     c_out <: getBit(val, l);
                                 }
                             }
                         }
-                        if (state == PAUSE) {
-                            printf("\n");
-                        }
                     }
-
+                    //if paused/stop then...
                     c_subDist[0] :> val;
                     aliveCells = val;
                     c_subDist[1] :> val;
                     aliveCells = aliveCells + val;
+
+                    //print status report.
                     printStatusReport(start, current, turn, aliveCells, state - 1);
                 }
                 break;
@@ -419,11 +411,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 {
   uint32_t linePart[SPLITWIDTH][IMHT]; //stores processing image
   uint32_t copyPart[SPLITWIDTH][IMHT]; //stores results.
-  uchar readIn = 1; //boolean for reading in files.
-  uchar safe = 0; // safe to send to workers
+  uchar readIn = 1;                    //boolean for reading in files.
+  uchar safe = 0;                      // safe to send to workers
 
-  uchar distColsReceived = 0;   //number of columns received from the distributor.
-  uchar distRowsReceived = 0;  //numbers of rows received from the distributor
+  uint32_t distColsReceived = 0;   //number of columns received from the distributor.
+  uint32_t distRowsReceived = 0;  //numbers of rows received from the distributor
 
   uint32_t actualWidth = 0; // actual width of the array used.
   uint32_t val = 0;
@@ -440,11 +432,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   uchar state = 0; // boolean for pause state
   uchar nextTurn = 0; //boolean for next Turn
 
-  uchar workerColsReceived = 0; //number of columns received from workers
-  uchar workerRowsReceived = 0; //number of rows received from workers
+  uint32_t workerColsReceived = 0; //number of columns received from workers
+  uint32_t workerRowsReceived = 0; //number of rows received from workers
 
-  uchar workerColsSent = 0; //number of columns sent to the worker. l
-  uchar workerRowsSent = 0; //number of rows sent to the worker. k
+  uint32_t workerColsSent = 0; //number of columns sent to the worker. l
+  uint32_t workerRowsSent = 0; //number of rows sent to the worker. k
 
   uchar workersStarted = 0; //number of workers starting to work
 
@@ -496,7 +488,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
             if (readIn) {
                 linePart[distColsReceived % actualWidth][distRowsReceived] = val;
                 distColsReceived ++;
-                if (distColsReceived % actualWidth == 0) { distRowsReceived ++; } //increment height when i goes over the "edge";
+                if (distColsReceived % actualWidth == 0) { distRowsReceived ++; }
             }
             break;
 
@@ -532,15 +524,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     for (int i = 0; i < IMHT; i++){
                         for (int j = 0; j < actualWidth; j++) {
                             linePart[j][i] = copyPart[j][i];
-                            uchar length = 30;
-                            if (actualWidth < SPLITWIDTH && j == actualWidth - 1) {
-                                length = IMHT % 30;
-                            }
                             if (j  < actualWidth - 1) {
-                                linePart[j][i] = assignRightEdge(copyPart[j][i], length, copyPart[j + 1][i]);
+                                linePart[j][i] = assignRightEdge(copyPart[j][i], 30, copyPart[j + 1][i]);
                             }
                             if (j > 0) {
-                                linePart[j][i] = assignLeftEdge(copyPart[j - 1][i], length, copyPart[j][i]);
+                                linePart[j][i] = assignLeftEdge(copyPart[j - 1][i], 30, copyPart[j][i]);
                             }
                         }
 
@@ -558,36 +546,18 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                             if (j == actualWidth -1 ) {
                                 length = IMWD % 30;
                             }
-                            if (state == PAUSE) {
-                                c_in <: copyPart[j][i]; // for debug sending image to be printed.
-                            }
-                            else if (state == STOP){ // if end send image to be printed.
+                            if (state == STOP){ // if end send image to be printed.
                                 c_in <: copyPart[j][i];
                             }
                             aliveCells = aliveCells + numberOfAliveCells(copyPart[j][i], length);
                         }
                     }
-                }
-
-                //send image to main distributor.
-                if (state == PAUSE) {
-                    for (int i = 0; i < IMHT; i ++) {
-                        for (int j = 0; j < actualWidth; j ++) {
-                            c_in <: copyPart[j][i];
-                            length = 30;
-                            if (j == actualWidth -1 ) {
-                                length = IMWD % 30;
-                            }
-                            aliveCells = aliveCells + numberOfAliveCells(copyPart[j][i], length);
-                        }
-                    }
                     c_in <: aliveCells;
-                    c_in :> val;
-                    state = val;
-                    //c_in :>
+                    if (state == PAUSE) {
+                        c_in :> val;
+                        state = val;
+                    }
                 }
-
-
                 // reset variables for next turn.
                 nextTurn = 0;
                 workerColsReceived = 0;
@@ -596,7 +566,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                 workerRowsSent = 0;
                 workersStarted = 0;
             }
-
             break;
       }
   }
@@ -608,24 +577,17 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
  */
 uchar deadOrAlive(uchar state, uchar count) {
     if (state == 255) {
-        if (count < 2 || count > 3) {
-            return 0;
-        }
+        if (count < 2 || count > 3) { return 0; }
     }
     // If dead
-    else if (count == 3) {
-        return 255;    // Now alive.
-    }
+    else if (count == 3) { return 255; } // Now alive.
     return state;
 }
 
-
+// returns 1 if input is equal to 255 else 0.
 uchar isTwoFiveFive(uchar input) {
-    if (input == 255) {
-        return 1;
-    } else {
-        return 0;
-    }
+    if (input == 255) { return 1; }
+    else { return 0; }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -646,6 +608,7 @@ void worker(chanend c_fromDist) {
         for (int j = 1; j < 31; j++) { // goes through each bit in the input
             count = 0;
             state = 0;
+            results[j - 1] = 0;
             for (int i = 0; i < 3; i++) { // goes through each row
                 count = count + isTwoFiveFive(getBit(lines[i], j + 1));
                 count = count + isTwoFiveFive(getBit(lines[i], j - 1));
