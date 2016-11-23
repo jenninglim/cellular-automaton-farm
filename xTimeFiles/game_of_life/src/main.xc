@@ -8,13 +8,20 @@
 #include "pgmIO.h"
 #include "i2c.h"
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+/*
+ * IMHT         128   256
+ * IMWD         128   256
+ *
+ * SPLITWIDTH     3    5
+ * UINTARRAYWIDTH 5    9
+ */
+#define  IMHT 256                  //image height
+#define  IMWD 256                  //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH 2                //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
-#define RUNUNTIL 2                  //for debug
+#define SPLITWIDTH 5                //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 9            //ceil(IMWD / 30)
+#define RUNUNTIL 101                  //for debug
 //Number of ...
 #define NUMBEROFWORKERS 3         //Workers
 #define NUMBEROFSUBDIST 2   //Sub-Distributors.
@@ -59,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
-char infname[] = "64x64.pgm";     //put your input image path here
-char outfname[] = "64x64(4).pgm"; //put your output image path here
+char infname[] = "256x256.pgm";     //put your input image path here
+char outfname[] = "256x256(2).pgm"; //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -105,12 +112,20 @@ void printStatusReport(double start, double current, int rounds, int liveCells, 
 // DISPLAYS an LED pattern
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-int showLEDs(out port p, chanend fromDist) {
+int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
     int pattern; // 1st bit (1) ...separate green LED
-               // 2nd bit (2) ...blue LED
-               // 3rd bit (4) ...green LED
-               // 4th bit (8) ...red LED
+                 // 2nd bit (2) ...blue LED
+                 // 3rd bit (4) ...green LED
+                 // 4th bit (8) ...red LED
     while (1) {
+        select {
+            case fromDist :> pattern:
+                p <: pattern;
+                break;
+            case fromDataIn :> pattern:
+                p <: pattern;
+                break;
+        }
         fromDist :> pattern;   // Receive new pattern from distributor.
         p <: pattern;          // Send pattern to LED port.
     }
@@ -215,7 +230,7 @@ uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], chanend c_out, chanend c_fromButtons)
+void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend c_toLEDs)
 {
   int res;
   uchar line[30];
@@ -230,6 +245,7 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons)
       c_fromButtons :> buttonPressed;
       if (buttonPressed == SW1) {
           initiated = 1;
+          c_toLEDs <: GRN;
       }
   }
   printf( "DataInStream: Start...\n" );
@@ -313,14 +329,14 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
         select {
             case c_fromButtons :> buttonPressed: //export state
                 if (buttonPressed == SW2) { //Export state.
-                    printf("STOP\n");
+                    c_toLEDs <: BLU;
                     state = STOP;
                 }
                 //recieve data from distributors
                 break;
 
             case fromAcc :> val:
-                if (val == 1) { state = 1; }
+                if (val == 1) { state = 1; c_toLEDs <: RED;  }
                 else if ( val == 0 ) { state = 0; }
                 break;
 
@@ -332,8 +348,8 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 aliveCells = aliveCells + val;
                 c_subDist[(i + 1) % 2] :> val; //wait for other subDist
                 printf( "\nRound %d completed...\n", turn);
-                turn++ ; //increment turn.
                 aliveCells = aliveCells + val;
+                turn++ ; //increment turn.
 
                 if (turn == RUNUNTIL ) { state = STOP; }
 
@@ -392,12 +408,11 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
 
                     //print status report.
                     printStatusReport(start, current, turn, aliveCells, state - 1);
+                    if (state == STOP) { c_toLEDs <: OFF; }  // Turn OFF the green LED to indicate reading of the image has FINISHED.
                 }
                 break;
         }
     }
-    c_toLEDs <: OFF;  // Turn OFF the green LED to indicate reading of the image has FINISHED.
-    c_toLEDs <: GRN;  // Turn ON the green LED to indicate reading of the image has STARTED.
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -414,12 +429,12 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   uchar readIn = 1;                    //boolean for reading in files.
   uchar safe = 0;                      // safe to send to workers
 
-  uint32_t distColsReceived = 0;   //number of columns received from the distributor.
-  uint32_t distRowsReceived = 0;  //numbers of rows received from the distributor
+  int distColsReceived = 0;   //number of columns received from the distributor.
+  int distRowsReceived = 0;  //numbers of rows received from the distributor
 
-  uint32_t actualWidth = 0; // actual width of the array used.
-  uint32_t val = 0;
-  uint32_t aliveCells = 0;
+  int actualWidth = 0; // actual width of the array used.
+  int val = 0;
+  int aliveCells = 0;
   uchar length = 0;
 
   /*
@@ -427,16 +442,16 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
    * first column represents cols sent
    * second represent rows sent
    */
-  uint32_t index[NUMBEROFWORKERS][2];
+  int index[NUMBEROFWORKERS][2];
 
   uchar state = 0; // boolean for pause state
   uchar nextTurn = 0; //boolean for next Turn
 
-  uint32_t workerColsReceived = 0; //number of columns received from workers
-  uint32_t workerRowsReceived = 0; //number of rows received from workers
+  int workerColsReceived = 0; //number of columns received from workers
+  int workerRowsReceived = 0; //number of rows received from workers
 
-  uint32_t workerColsSent = 0; //number of columns sent to the worker. l
-  uint32_t workerRowsSent = 0; //number of rows sent to the worker. k
+  int workerColsSent = 0; //number of columns sent to the worker. l
+  int workerRowsSent = 0; //number of rows sent to the worker. k
 
   uchar workersStarted = 0; //number of workers starting to work
 
@@ -523,13 +538,14 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     //logic for sending edges
                     for (int i = 0; i < IMHT; i++){
                         for (int j = 0; j < actualWidth; j++) {
-                            linePart[j][i] = copyPart[j][i];
+                            val = copyPart[j][i];
                             if (j  < actualWidth - 1) {
-                                linePart[j][i] = assignRightEdge(copyPart[j][i], 30, copyPart[j + 1][i]);
+                               val = assignRightEdge(copyPart[j][i], 30, copyPart[j + 1][i]);
                             }
                             if (j > 0) {
-                                linePart[j][i] = assignLeftEdge(copyPart[j - 1][i], 30, copyPart[j][i]);
+                                val = assignLeftEdge(copyPart[j - 1][i], 30, val);
                             }
+                            linePart[j][i] = val;
                         }
 
                         //when actualWidth == 1 we have a problem
@@ -723,15 +739,15 @@ i2c_master_if i2c[1];               //interface to orientation
 chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
 chan c_workers[NUMBEROFWORKERS];     // Worker channels (one for each worker).
 chan c_otherWorkers[NUMBEROFWORKERS];
-chan c_buttonsToDist, c_DistToLEDs, c_buttonsToData;  // Button and LED channels.
+chan c_buttonsToDist, c_distToLEDs, c_buttonsToData, c_dataToLEDs;  // Button and LED channels.
 chan c_subDist[NUMBEROFSUBDIST];
 
 par {
     on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
     on tile[1]: orientation(i2c[0],c_control);        //client thread reading orientation data
-    on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData);          //thread to read in a PGM image
+    on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData, c_dataToLEDs);          //thread to read in a PGM image
     on tile[1]: DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    on tile[1]: mainDistributor(c_buttonsToDist, c_DistToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);
+    on tile[1]: mainDistributor(c_buttonsToDist, c_distToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);
     on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);//thread to coordinate work on image
     on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
     par (int i = 0; i < NUMBEROFWORKERS; i++){ //making workers
@@ -740,7 +756,7 @@ par {
     }
 
     on tile[0]: buttonListener(buttons,c_buttonsToData, c_buttonsToDist);  // Thread to listen for button presses.
-    on tile[0]: showLEDs(leds, c_DistToLEDs);              // Thread to process LED change requests.
+    on tile[0]: showLEDs(leds, c_distToLEDs, c_dataToLEDs);              // Thread to process LED change requests.
   }
 
   return 0;
