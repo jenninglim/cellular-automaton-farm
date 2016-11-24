@@ -227,9 +227,15 @@ uint32_t assignLeftEdge(uint32_t left, uchar leftLength, uint32_t middle) {
     }
     return val;
 }
-/*
- * assignRightEdge: assigns the right "edge value" to the "middle row.
- */
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Given,
+// (uint32_t) middle: the row representation left of the "middle" row.
+// (uint32_t) right:  the "middle" row to be assigned the edge cases.
+// Return the numbers of 1s in the binary representation.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
     uint32_t val = middle;
     if (getBit(right,1) == 255) {
@@ -314,6 +320,12 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
   return;
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Main Distributor is working
+// cells in last round, and the time elapsed since the original image was read in.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
     double start;          // Start time for processing.
@@ -471,16 +483,16 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
    */
   int index[NUMBEROFWORKERS][2];
 
-  uchar state = 0; // boolean for pause state
-  uchar nextTurn = 0; //boolean for next Turn
+  uchar state = 0;            // boolean for pause state
+  uchar nextTurn = 0;         //boolean for next Turn
 
   int workerColsReceived = 0; //number of columns received from workers
   int workerRowsReceived = 0; //number of rows received from workers
 
-  int workerColsSent = 0; //number of columns sent to the worker. l
-  int workerRowsSent = 0; //number of rows sent to the worker. k
+  int workerColsSent = 0;     //number of columns sent to the worker. l
+  int workerRowsSent = 0;     //number of rows sent to the worker. k
 
-  uchar workersStarted = 0; //number of workers starting to work
+  uchar workersStarted = 0;   //number of workers starting to work
 
   //initialise array
   for (int i = 0; i < NUMBEROFWORKERS; i ++) {
@@ -499,7 +511,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (state != STOP) {
-      if (distRowsReceived == IMHT) { readIn = 0; } //finished readIn!
+      if (distRowsReceived == IMHT) { readIn = 0; }                               //finished readIn!
       if (workerRowsSent == IMHT && workerRowsReceived == IMHT) { nextTurn = 1; } //next turn!!
 
       // starts to work the workers.
@@ -514,7 +526,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
           workersStarted ++;
       }
 
-      // various conditions for "safety"
       //Various if conditions for unsafe working of worker.
       if (readIn) {
           if (workerRowsSent + 2 < distRowsReceived ) {
@@ -523,7 +534,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
           else { safe = 0; }
       }
       else { safe = 1; }
-
       select {
         //case when receiving from the (main distributor).
         case c_in :> val:
@@ -604,7 +614,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     }
                 }
 
-                // reset variables for next turn.
+                //reset variables for next turn.
                 nextTurn = 0;
                 workerColsReceived = 0;
                 workerRowsReceived = 0;
@@ -617,20 +627,30 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   }
 }
 
-/*
- * Return if cell is dead or alive depending on
- * the current state and count.
- */
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Given the current "state" of the cell,
+// and the count of the surrounding neighbours.
+// Return the new state.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 uchar deadOrAlive(uchar state, uchar count) {
+    uchar newState = state;
     if (state == 255) {
-        if (count < 2 || count > 3) { return 0; }
+        if (count < 2 || count > 3) { newState = 0; }
     }
     // If dead
-    else if (count == 3) { return 255; } // Now alive.
-    return state;
+    else if (count == 3) { newState = 255; } // Now alive.
+    return newState;
 }
 
-// returns 1 if input is equal to 255 else 0.
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Given a (uchar) input,
+// Determine if is equal to 255
+// Return 1, otherwise 0.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 uchar isTwoFiveFive(uchar input) {
     if (input == 255) { return 1; }
     else { return 0; }
