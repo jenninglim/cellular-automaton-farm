@@ -15,16 +15,17 @@
  * SPLITWIDTH     3    5
  * UINTARRAYWIDTH 5    9
  */
-#define  IMHT 256                  //image height
-#define  IMWD 256                  //image width
+#define  IMHT 256                   //image height
+#define  IMWD 256                   //image width
 
 //the variables below must change when image size changes
 #define SPLITWIDTH 5                //ceil(UINTARRAYWIDTH /2)
 #define UINTARRAYWIDTH 9            //ceil(IMWD / 30)
-#define RUNUNTIL 101                  //for debug
+#define RUNUNTIL 101                //for debug
+
 //Number of ...
-#define NUMBEROFWORKERS 3         //Workers
-#define NUMBEROFSUBDIST 2   //Sub-Distributors.
+#define NUMBEROFWORKERS 3           //Workers
+#define NUMBEROFSUBDIST 2           //Sub-Distributors.
 
 //Signals sent from master to sub distributors. State of the farm.
 #define CONTINUE 0
@@ -32,15 +33,15 @@
 #define STOP     2
 
 // Buttons signals.
-#define SW2 13     // SW2 button signal.
-#define SW1 14     // SW1 button signal.
+#define SW2 13                      // SW2 button signal.
+#define SW1 14                      // SW1 button signal.
 
 // LED signals.
-#define OFF  0     // Signal to turn the LED off.
-#define GRNS 1     // Signal to turn the separate green LED on.
-#define BLU  2     // Signal to turn the blue LED on.
-#define GRN  4     // Signal to turn the green LED on.
-#define RED  8     // Signal to turn the red LED on.
+#define OFF  0                      // Signal to turn the LED off.
+#define GRNS 1                      // Signal to turn the separate green LED on.
+#define BLU  2                      // Signal to turn the blue LED on.
+#define GRN  4                      // Signal to turn the green LED on.
+#define RED  8                      // Signal to turn the red LED on.
 
 // Interface ports to orientation
 on tile[0]: port p_scl = XS1_PORT_1E;
@@ -64,7 +65,7 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-typedef unsigned char uchar;      //using uchar as shorthand
+typedef unsigned char uchar;        //using uchar as shorthand
 
 char infname[] = "256x256.pgm";     //put your input image path here
 char outfname[] = "256x256(2).pgm"; //put your output image path here
@@ -78,7 +79,7 @@ double getCurrentTime() {
     double time;
     timer t;
     t :> time;
-    time /= 100000000;  // Convert to seconds.
+    time /= 100000000;              // Convert to seconds.
     return time;
 }
 
@@ -113,10 +114,10 @@ void printStatusReport(double start, double current, int rounds, int liveCells, 
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
-    int pattern; // 1st bit (1) ...separate green LED
-                 // 2nd bit (2) ...blue LED
-                 // 3rd bit (4) ...green LED
-                 // 4th bit (8) ...red LED
+    int pattern;                     // 1st bit (1) ...separate green LED
+                                     // 2nd bit (2) ...blue LED
+                                     // 3rd bit (4) ...green LED
+                                     // 4th bit (8) ...red LED
     while (1) {
         select {
             case fromDist :> pattern:
@@ -126,8 +127,8 @@ int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
                 p <: pattern;
                 break;
         }
-        fromDist :> pattern;   // Receive new pattern from distributor.
-        p <: pattern;          // Send pattern to LED port.
+        fromDist :> pattern;        // Receive new pattern from distributor.
+        p <: pattern;               // Send pattern to LED port.
     }
     return 0;
 }
@@ -142,8 +143,8 @@ void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
     while (1) {
         b when pinseq(15)  :> r;     // Check that no button is pressed.
         b when pinsneq(15) :> r;     // Check if some buttons are pressed.
-        if (r == SW1) {  // If either button is pressed
-            c_toDataIn <: r;           // send button pattern to distributor.
+        if (r == SW1) {              // If either button is pressed
+            c_toDataIn <: r;         // send button pattern to distributor.
         }
         if (r == SW2) {
             c_toDist <: r;
@@ -151,7 +152,12 @@ void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
     }
 }
 
-//Returns a bit in a unint32_t integer
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Given an int32_t and an index, find the binary representation at the index.
+// Return 255 if 1, 0 otherwise.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 uchar getBit(uint32_t queriedInt, uchar index) {
     if ( (queriedInt & 0x00000001 << (31 - index)) == 0 ) {
         return 0;
@@ -161,9 +167,12 @@ uchar getBit(uint32_t queriedInt, uchar index) {
     }
 }
 
-/*
- * Count alive cells in a uint32_t
- */
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Given an int32_t and an index,
+// Return the numbers of 1s in the binary representation.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 uint32_t numberOfAliveCells(uint32_t cells, uchar length) {
     int count = 0;
     for (int i = 1; i < length + 1; i ++) {
@@ -184,9 +193,12 @@ void printBinary(uint32_t queriedInt, uchar length) {
     }
 }
 
-/*
- * adhoc compress
- */
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Given an int32_t and an index,
+// Return the numbers of 1s in the binary representation.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 uint32_t compress(uchar array[], uchar length) {
     uint32_t val = 0;
     for (int i = 0; i < length; i ++) {
@@ -197,9 +209,14 @@ uint32_t compress(uchar array[], uchar length) {
     return val;
 }
 
-/*
- * assignLeftEdge: assigns the left "edge value" to the "middle" row.
- */
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+// Given,
+// uint32_t left:  the row representation left of the "middle row"
+// uint32_t right: the "middle" row to be assigned the edge cases.
+// Return the numbers of 1s in the binary representation.
+//
+/////////////////////////////////////////////////////////////////////////////////////////
 uint32_t assignLeftEdge(uint32_t left, uchar leftLength, uint32_t middle) {
     uint32_t val = middle;
     if (getBit(left,leftLength) == 255) {
