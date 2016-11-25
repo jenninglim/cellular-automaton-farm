@@ -15,12 +15,12 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43
  */
-#define  IMHT 512                         //image height
-#define  IMWD 512                         //image width
+#define  IMHT 32                         //image height
+#define  IMWD 32                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH     9                 //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 18                 //ceil(IMWD / 30)
+#define SPLITWIDTH     1                 //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 2                 //ceil(IMWD / 30)
 #define RUNUNTIL     1000                //for debug
 
 //Number of ...
@@ -65,10 +65,10 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-typedef unsigned char uchar;          //using uchar as shorthand
+typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "512x512.pgm";         //put your input image path here
-char outfname[] = "512x512(1000).pgm";  //put your output image path here
+char infname[] = "32x32.pgm";         //put your input image path here
+char outfname[] = "32x32(1000).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
