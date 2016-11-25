@@ -10,7 +10,7 @@
 #define IMHT 64    // Image height.
 #define IMWD 64    // Image width.
 
-#define MAX_ROUNDS 3000  // Maxiumum number of rounds to be processed (uncomment relevant if statement in Distributor).
+#define MAX_ROUNDS 10  // Maxiumum number of rounds to be processed (uncomment relevant if statement in Distributor).
 
 #define WORKERS 4  // Total number of workers processing the image.
 
@@ -47,7 +47,7 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[] = "64x64.pgm";      // Input image path
+char infname[]  = "64x64.pgm";               // Input image path
 char outfname[] = "64x64out(w4-r1000).pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -325,8 +325,9 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                         }
                     }
                     current = getCurrentTime();
+
                     if (current < start) {
-                        current += 42.94967295;  // (2^32)-1 / 100000000
+                        current += 42.94967295;  // (2^32)-1 / 100000000 (max timer value in seconds)
                     }
                     totalTime += current - start;
 
