@@ -10,7 +10,7 @@
 #define IMHT 64    // Image height.
 #define IMWD 64    // Image width.
 
-#define MAX_ROUNDS 1  // Maxiumum number of rounds to be processed (uncomment relevant if statement in Distributor).
+#define MAX_ROUNDS 3000  // Maxiumum number of rounds to be processed (uncomment relevant if statement in Distributor).
 
 #define WORKERS 4  // Total number of workers processing the image.
 
@@ -47,8 +47,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[] = "64X64.pgm";      // Input image path
-char outfname[] = "64X64out(w1-r1).pgm";  // Output image path
+char infname[] = "64x64.pgm";      // Input image path
+char outfname[] = "64x64out(w4-r1000).pgm";  // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -158,9 +158,9 @@ double getCurrentTime() {
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void printStatusReport(double start, double current, int rounds, uchar image[IMWD][IMHT], int final) {
+void printStatusReport(double totalTime, int rounds, uchar image[IMWD][IMHT], int final) {
     int alive = countLiveCells(image);  // The number of live cells in the image.
-    double time = current - start;      // Total time elapsed.
+    //double time = current - start;      // Total time elapsed.
 
     printf("\n----------------------------------\n");
     if (final) {
@@ -171,10 +171,11 @@ void printStatusReport(double start, double current, int rounds, uchar image[IMW
     }
     printf("Rounds Processed: %d\n"
            "Live Cells: %d / %d\n"
-           "Time Elapsed: %.4lf seconds\n"
+           "Total Time Elapsed: %.4lf seconds\n"
+           "Average Time/Round: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           rounds, alive, IMHT*IMWD, time, WORKERS);
+           rounds, alive, IMHT*IMWD, totalTime, totalTime/rounds, WORKERS);
 }
 
 
@@ -219,6 +220,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
     int running = 1;                    // Whether to keep running.
     double start = getCurrentTime();    // Start time of processing.
     double current = getCurrentTime();  // Time after processing a round.
+    double totalTime = 0;
 
     while (running) {
 
@@ -227,7 +229,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
             case c_fromButtons :> buttonPressed:
                 if (buttonPressed == SW2) {
                     c_toLEDs <: BLU;  // Turn ON the blue LED to indicate export of the image has STARTED.
-                    printStatusReport(start, current, rounds, image, 1);
+                    printStatusReport(totalTime, rounds, image, 1);
                     //printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
                     for (int y = 0; y < IMHT; y++) {
                         //printf("[%2.1d]", y);
@@ -247,7 +249,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
             case fromAcc :> tiltVal:
                 // Board vertical.
                 c_toLEDs <: RED;  // Turn ON the red LED to indicate that the state is PAUSED.
-                printStatusReport(start, current, rounds, image, 0);
+                printStatusReport(totalTime, rounds, image, 0);
 
                 // Board horizontal.
                 fromAcc :> tiltVal;
@@ -257,6 +259,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
             // Otherwise, continue processing the image.
             default:
                 if (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
+                    start = getCurrentTime();
                     // Alternate the separate green light on and off each round while processing rounds.
                     if (rounds % 2 == 0) {
                         c_toLEDs <: GRNS;
@@ -322,6 +325,11 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                         }
                     }
                     current = getCurrentTime();
+                    if (current < start) {
+                        current += 42.94967295;  // (2^32)-1 / 100000000
+                    }
+                    totalTime += current - start;
+
                     rounds++;
 
                 }
