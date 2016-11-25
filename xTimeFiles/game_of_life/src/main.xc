@@ -47,8 +47,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[]  = "64x64.pgm";               // Input image path
-char outfname[] = "64x64out(w4-r1000).pgm";  // Output image path
+char infname[]  = "64x64.pgm";               // Input image path.
+char outfname[] = "64x64out(w4-r1000).pgm";  // Output image path.
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
