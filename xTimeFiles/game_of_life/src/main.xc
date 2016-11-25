@@ -9,19 +9,19 @@
 #include "i2c.h"
 
 /*
- * IMHT         128   256
- * IMWD         128   256
+ * IMHT           16    32   64    128   256   512
+ * IMWD           16    32   64    128   256   512
  *
- * SPLITWIDTH     3    5
- * UINTARRAYWIDTH 5    9
+ * SPLITWIDTH       1    1    2      3    5    9
+ * UINTARRAYWIDTH   1    2    3      5    9    18
  */
-#define  IMHT 256                   //image height
-#define  IMWD 256                   //image width
+#define  IMHT 64                   //image height
+#define  IMWD 64                   //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH 5                //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 9            //ceil(IMWD / 30)
-#define RUNUNTIL 101                //for debug
+#define SPLITWIDTH     2            //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
+#define RUNUNTIL     3000                //for debug
 
 //Number of ...
 #define NUMBEROFWORKERS 3           //Workers
@@ -67,8 +67,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;        //using uchar as shorthand
 
-char infname[] = "256x256.pgm";     //put your input image path here
-char outfname[] = "256x256(2).pgm"; //put your output image path here
+char infname[] = "64x64.pgm";     //put your input image path here
+char outfname[] = "64x64(1000).pgm"; //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -89,8 +89,7 @@ double getCurrentTime() {
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void printStatusReport(double start, double current, int rounds, int liveCells, int final) {
-    double time = current - start;  // Total time elapsed.
+void printStatusReport(double totalTime, int rounds, int liveCells, int final) {
 
     printf("\n----------------------------------\n");
     if (final) {
@@ -104,7 +103,7 @@ void printStatusReport(double start, double current, int rounds, int liveCells, 
            "Time Elapsed: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           rounds, liveCells, IMHT*IMWD, time, NUMBEROFWORKERS);
+           rounds, liveCells, IMHT*IMWD, totalTime, NUMBEROFWORKERS);
 }
 
 
@@ -140,14 +139,16 @@ int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
     int r;  // Received button signal.
+    uchar sw1Pressed = 0;
     while (1) {
-        b when pinseq(15)  :> r;     // Check that no button is pressed.
-        b when pinsneq(15) :> r;     // Check if some buttons are pressed.
-        if (r == SW1) {              // If either button is pressed
-            c_toDataIn <: r;         // send button pattern to distributor.
+        b when pinseq(15)  :> r;               // Check that no button is pressed.
+        b when pinsneq(15) :> r;               // Check if some buttons are pressed.
+        if (r == SW1 && sw1Pressed == 0) {     // If either button is pressed/e3q2w
+            c_toDataIn <: r;                   // send button pattern to distributor.
+            sw1Pressed = 1;
         }
-        if (r == SW2) {
-            c_toDist <: r;
+        if (r == SW2 && sw1Pressed) {
+            c_toDist   <: r;
         }
     }
 }
@@ -291,7 +292,6 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
           _readinline( line, length);
           row[i] = compress(line,length); // compresses into bits.
       }
-
       //assign edges values to each row.
       for (int i = 0; i < UINTARRAYWIDTH; i++ ) {
           //assign right edge
@@ -328,8 +328,9 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
 /////////////////////////////////////////////////////////////////////////////////////////
 void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
-    double start;          // Start time for processing.
-    double current;         //time after processing a round.
+    double start = 0;           // Start time for processing.
+    double current = 0;         //time after processing a round.
+    double totalTime = 0;
     uchar state = 0;        //Signal to the sub distributors the state of the farm.
     int turn = 1;           //turn number
     int aliveCells = 0;     //number of live cells at turn
@@ -354,30 +355,34 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
             }
         }
     }
+
     //records the current time.
     start = getCurrentTime();
 
     while (1) {
         select {
-            case c_fromButtons :> buttonPressed: //export state
-                if (buttonPressed == SW2) { //Export state.
+            case c_fromButtons :> buttonPressed:
+                if (buttonPressed == SW2) {      //Export state.
                     c_toLEDs <: BLU;
                     state = STOP;
                 }
-                //recieve data from distributors
                 break;
 
             case fromAcc :> val:
+                printf("Tilted Board\n");
                 if (val == 1) { state = 1; c_toLEDs <: RED;  }
-                else if ( val == 0 ) { state = 0; }
                 break;
 
             case c_subDist[int i] :> val:
-                c_toLEDs <: OFF;
                 //reseting variables.
                 for (int i = 0; i < 4; i++) { edges[i] = 0; }
                 c_subDist[(i + 1) % 2] :> val; //wait for other subDist
                 current = getCurrentTime();
+                if (current < start) {
+                    current += 42.94967295;
+                }
+                totalTime += current - start;
+                c_toLEDs <: OFF;
                 //printf( "\nRound %d completed...\n", turn);
 
                 if (turn == RUNUNTIL ) { state = STOP; } //for debug
@@ -390,7 +395,6 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 //if CONTINUE, receive images edges from sub distributor to be assigned edges.
                 if (state == CONTINUE) {
                     turn++ ; //increment turn.
-                    c_toLEDs <: GRNS;
                     for (int i = 0; i < IMHT; i ++ ){
                         //receiving edges.
                         c_subDist[0] :> edges[0];
@@ -416,18 +420,23 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                             c_subDist[1] <: edges[j+2];
                         }
                      }
+                    start = getCurrentTime();
+                    c_toLEDs <: GRNS;
                 }
                 else {
-                    if (state == STOP) { //if stop then...
-                        for (int i = 0; i < IMHT; i ++) {
-                            for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
-                                length = 30;
-                                if (j == UINTARRAYWIDTH - 1) { length = IMWD % 30; }
+                    for (int i = 0; i < IMHT; i ++) {
+                        for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
+                            length = 30;
+                            if (j == UINTARRAYWIDTH - 1) { length = IMWD % 30; }
 
-                                //receiving image from distributors to be written out.
-                                if (j < SPLITWIDTH) { c_subDist[0] :> val; }
-                                else { c_subDist[1] :> val; }
+                            //receiving image from distributors to be written out.
+                            if (j < SPLITWIDTH) { c_subDist[0] :> val; }
+                            else { c_subDist[1] :> val; }
 
+                            //calculate live cells.
+                            aliveCells = aliveCells + numberOfAliveCells(val, length);
+
+                            if (state == STOP) {
                                 //splitting uint32_t into its constituent bits
                                 //sent to be written out.
                                 for (int l = 1 ; l < length + 1 ; l ++) {
@@ -436,16 +445,14 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                             }
                         }
                     }
-                    else if (state == PAUSE) { c_toLEDs <: RED; }  // Turn ON the red LED to indicate that the state is PAUSED
-                    //if paused/stop then...
-                    // receive the number of alive cells.
-                    c_subDist[0] :> val;
-                    aliveCells = val;
-                    c_subDist[1] :> val;
-                    aliveCells = aliveCells + val;
-
                     //print status report.
-                    printStatusReport(start, current, turn, aliveCells, state - 1);
+                    printStatusReport(totalTime, turn, aliveCells, state - 1);
+                    while (state == PAUSE) {
+                        fromAcc :> val;
+                        if (val == 0) {
+                            state = CONTINUE;
+                        }
+                    }
 
                     if (state == STOP) { c_toLEDs <: OFF; }  // Turn OFF the green LED to indicate reading of the image has FINISHED.
                 }
@@ -473,7 +480,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
   int actualWidth = 0; // actual width of the array used.
   int val = 0;
-  int aliveCells = 0;
   uchar length = 0;
 
   /*
@@ -527,11 +533,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
 
       //Various if conditions for unsafe working of worker.
-      if (readIn) {
+      if (readIn) { /*
           if (workerRowsSent + 2 < distRowsReceived ) {
               safe = 1;
           }
-          else { safe = 0; }
+          else { safe = 0; } */
       }
       else { safe = 1; }
       select {
@@ -600,17 +606,10 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                             length = 30;
                             if (j == actualWidth - 1 ) { length = IMWD % 30; }
 
-                            // if end, send the image to DataOutStream.
-                            if (state == STOP){
-                                c_in <: copyPart[j][i];
-                            }
-                            aliveCells = aliveCells + numberOfAliveCells(copyPart[j][i], length);
+                            // if end, send the image to main distributor.
+                            c_in <: copyPart[j][i];
+
                         }
-                    }
-                    c_in <: aliveCells;
-                    if (state == PAUSE) {
-                        c_in :> val;
-                        state = val;
                     }
                 }
 
