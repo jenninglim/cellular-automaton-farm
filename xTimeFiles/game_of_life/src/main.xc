@@ -1,4 +1,4 @@
-// COMS20001 - Cellular Automaton Farm - Initial Code Skeleton
+// COMS20001 - Cellular Automaton Farm - Single Distributor Farming (Bytes)
 // (using the XMOS i2c accelerometer demo code)
 
 #include <platform.h>
@@ -9,17 +9,11 @@
 
 #define IMHT 64    // Image height.
 #define IMWD 64    // Image width.
-#define SEGHT 4   // Height of a farming segment.
+#define SEGHT 8    // Height of a farming segment.
 
 #define MAX_ROUNDS 2  // Maxiumum number of rounds to be processed.
 
 #define WORKERS 4  // Total number of workers processing the image.
-
-// Worker Types.
-#define SINGLE 0   // Worker that processes an image all on its own!
-#define LEFT   1   // Worker that processes the left-most segment of an image.
-#define CENTRE 2   // Worker that processes one of the centre segments of an image.
-#define RIGHT  3   // Worker that processes the right-most segment of an image.
 
 // Port to access xCORE-200 buttons.
 on tile[0]: in port buttons = XS1_PORT_4E;
@@ -54,8 +48,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
 // Image paths.
-char infname[] = "64x64.pgm";      // Input image path
-char outfname[] = "64x64out.pgm";  // Output image path
+char infname[]  = "64x64.pgm";      // Input image path
+char outfname[] = "64x64out.pgm";   // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -165,9 +159,8 @@ double getCurrentTime() {
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void printStatusReport(double start, double current, int rounds, uchar image[IMWD][IMHT], int final) {
+void printStatusReport(double totalTime, int rounds, uchar image[IMWD][IMHT], int final) {
     int alive = countLiveCells(image);  // The number of live cells in the image.
-    double time = current - start;      // Total time elapsed.
 
     printf("\n----------------------------------\n");
     if (final) {
@@ -178,10 +171,11 @@ void printStatusReport(double start, double current, int rounds, uchar image[IMW
     }
     printf("Rounds Processed: %d\n"
            "Live Cells: %d / %d\n"
-           "Time Elapsed: %.4lf seconds\n"
+           "Total Time Elapsed: %.4lf seconds\n"
+           "Average Time/Round: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           rounds, alive, IMHT*IMWD, time, WORKERS);
+           rounds, alive, IMHT*IMWD, totalTime, totalTime/rounds, WORKERS);
 }
 
 
@@ -192,11 +186,11 @@ void printStatusReport(double start, double current, int rounds, uchar image[IMW
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend c_out, chanend fromAcc, chanend c_toWorker[n], unsigned n) {
-    uchar image[IMWD][IMHT];  // The whole image being processed.
+    uchar image[IMWD][IMHT];     // The whole image being processed.
     uchar newImage[IMWD][IMHT];  // The whole image being processed.
-    uchar pixel;              // A single pixel being sent to a worker.
-    int buttonPressed;        // The button pressed on the xCore-200 Explorer.
-    int tilted;               // Value received when the board orientation is changed.
+    uchar pixel;                 // A single pixel being sent to a worker.
+    int buttonPressed;           // The button pressed on the xCore-200 Explorer.
+    int tiltVal;                 // Value received when the board orientation is changed.
 
     printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
 
@@ -223,10 +217,11 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
     // Processing the rounds.
     printf("\nProcessing...\n");
-    int rounds = 0;                     // The number of rounds processed.
-    int running = 1;                    // Whether to keep running.
-    double start = getCurrentTime();    // Start time of processing.
-    double current = getCurrentTime();  // Time after processing a round.
+    int rounds = 0;        // The number of rounds processed.
+    int running = 1;       // Whether to keep running.
+    double start;          // Start time of processing.
+    double current;        // Time after processing a round.
+    double totalTime = 0;  // Total time spent processing rounds.
 
     while (running) {
 
@@ -235,7 +230,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
             case c_fromButtons :> buttonPressed:
                 if (buttonPressed == SW2) {
                     c_toLEDs <: BLU;  // Turn ON the blue LED to indicate export of the image has STARTED.
-                    printStatusReport(start, current, rounds, image, 1);
+                    printStatusReport(totalTime, rounds, image, 1);
                     //printf("       [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]  [10]  [11]  [12]  [13]  [14]  [15]\n");
                     for (int y = 0; y < IMHT; y++) {
                     //    printf("[%2.1d]", y);
@@ -252,19 +247,20 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
             // When the board is vertical, pause the state and print a status report.
             // Resume processing when horizontal again.
-            case fromAcc :> tilted:
+            case fromAcc :> tiltVal:
                 // Board vertical.
                 c_toLEDs <: RED;  // Turn ON the red LED to indicate that the state is PAUSED.
-                printStatusReport(start, current, rounds, image, 0);
+                printStatusReport(totalTime, rounds, image, 0);
 
                 // Board horizontal.
-                fromAcc :> tilted;
+                fromAcc :> tiltVal;
                 c_toLEDs <: OFF;  // Turn OFF the red LED to indicate that the state is UNPAUSED.
                 break;
 
             // Otherwise, continue processing the image.
             default:
                 if (rounds < MAX_ROUNDS) {  // UNCOMMENT THIS WHEN PROCESSING A SPECIFIED NUMBER OF ROUNDS.
+                    start = getCurrentTime();
                     // Alternate the separate green light on and off each round while processing rounds.
                     if (rounds % 2 == 0) {
                         c_toLEDs <: GRNS;
@@ -273,8 +269,8 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                         c_toLEDs <: OFF;
                     }
 
-                    // 3 rows are sent to a worker at a time (FARMING PARALLELISM).
-                    int workerRow[WORKERS];  // The rows that the workers are currently analysing.
+                    // SEGHT rows are sent to a worker at a time (FARMING PARALLELISM).
+                    int workerRow[WORKERS];   // The rows that the workers are currently analysing.
 
                     // SENDING THE INITIAL ROWS TO EACH WORKER.
                     int y = 0;             // Row reference.
@@ -283,14 +279,12 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
                     while (w < WORKERS) {
                         for (int y2 = 0; y2 < SEGHT + 2; y2++) {
-                            //printf("worker %d: row %d\n", w, (((y + IMHT) - 1) % IMHT));
                             for (int x = 0; x < IMWD + 2; x++) {
                                 pixel = image[(((x + IMWD) - 1) % IMWD)][(((y + IMHT) - 1) % IMHT)];
                                 c_toWorker[w] <: pixel;
                             }
                             if (y2 == 0) {
                                 workerRow[w] = y;
-                                //printf("1. workerRow[%d] = %d\n", w, y);
                             }
                             y++;
                         }
@@ -300,57 +294,74 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                         if (y == IMHT) break;
                     }
 
-                    // RECEIVING UPDATES AND FARMING OUT MORE ROWS.
+                    /* UNCOMMENT WHEN SHOWING CORE PRIORITISATION.
+                    int workerSegs[WORKERS];  // Number of segments contributed by each worker.
+                    for (int i = 0; i < WORKERS; i++) {
+                        workerSegs[i] = 0;
+                    }
+                    */
 
-                    int segmentsReceived = 0;
+                    // RECEIVING UPDATES AND FARMING OUT MORE ROWS.
+                    int segmentsReceived = 0;  // The total number of worker segments received.
                     while (segmentsReceived < IMHT / SEGHT) {
                         select {
                             // Processed pixel received from worker i.
                             case c_toWorker[int i] :> pixel:
-                                printf("Received rows %d - %d from worker %d\n", workerRow[i], workerRow[i]+(SEGHT-1), i);
-                                // Update the image with new pixel values.
-                                //printf("workerRow[i] = %d\n", workerRow[i]);
+                                // Update the newImage with new pixel values.
                                 newImage[0][workerRow[i]] = pixel;
                                 for (int y2 = 0; y2 < SEGHT; y2++) {
                                     for (int x = 0; x < IMWD; x++) {
                                         if (y2 == 0 && x == 0) x = 1;  // First pixel already added.
-                                        //printf("here? %d\n", x);
                                         c_toWorker[i] :> pixel;
                                         newImage[x][workerRow[i]+y2] = pixel;
                                     }
-                                    //printf("Received row %d from worker %d\n",workerRow[i]+y2, i);
                                 }
 
                                 segmentsReceived++;
-                                //printf("segmentsReceived = %d\n", segmentsReceived);
+                                // UNCOMMENT WHEN SHOWING CORE PRIORITISATION.
+                                // workerSegs[i]++;
 
                                 // If there are rows still to complete, send more.
                                 if (segmentsSent < IMHT / SEGHT) {
                                     for (int y2 = 0; y2 < SEGHT + 2; y2++) {
-                                        //printf("worker %d: row %d\n", i, (((y + IMHT) - 1) % IMHT));
                                         for (int x = 0; x < IMWD + 2; x++) {
                                             pixel = image[(((x + IMWD) - 1) % IMWD)][(((y + IMHT) - 1) % IMHT)];
                                             c_toWorker[i] <: pixel;
                                         }
                                         if (y2 == 0) {
                                             workerRow[i] = y;
-                                            //printf("2. workerRow[%d] = %d\n", i, y);
                                         }
                                         y++;
                                     }
-                                    //printf("\n");
                                     segmentsSent++;
-                                    //printf("segmentsSent = %d\n", segmentsSent);
                                     y -= 2;
                                 }
                                 break;
                         }
                     }
+
+                    /* UNCOMMENT WHEN SHOWING CORE PRIORITISATION.
+                    for (int i = 0; i < WORKERS; i++) {
+                        printf("Segments contributed by worker %d: %d\n", i, workerSegs[i]);
+                    }
+                    */
+
+                    // Copy newImage to image in preparation for the next round.
                     memcpy(image, newImage, sizeof(uchar) * IMHT * IMWD);
                     current = getCurrentTime();
+
+                    // Adjustment for max timer value.
+                    if (current < start) {
+                        current += 42.94967295;  // (2^32)-1 / 100000000 (max timer value in seconds)
+                    }
+                    totalTime += current - start;
+
                     rounds++;
-                    printf("ROUND %d COMPLETE\n\n", rounds);
+
                 }
+                else {
+                    c_toLEDs <: OFF;
+                }  // END OF MAX_ROUNDS IF STATEMENT.
                 break;
         }
     }
@@ -433,7 +444,7 @@ void waitForSeconds(unsigned int seconds) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend c_fromDist) {
     uchar image[IMWD + 2][SEGHT + 2];  // The segment of the whole image that the worker will process.
-    uchar pixel;                          // A single pixel in the image.
+    uchar pixel;                       // A single pixel in the image.
 
     while (1) {
         // READ IN IMAGE SEGMENT FROM DISTRIBUTOR.
@@ -444,9 +455,9 @@ void worker(chanend c_fromDist) {
             }
         }
 
-        // Wait for a second to allow all workers to contribute evenly.
-        // Used to prove that the OS prioritises some threads over others in select statements.
-        waitForSeconds(1);
+        // Wait for a second to allow all workers to contribute evenly. Used to prove that some cores
+        // are prioritised over others in select statements if more than one waiting to be read in.
+        // waitForSeconds(1);
 
         // ANALYSE IMAGE SEGMENT FOR POTENTIAL CHANGES FOR NEXT ROUND.
         // Skip the top and bottom rows as they are boundaries provided for info only.
@@ -474,8 +485,8 @@ void worker(chanend c_fromDist) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void DataOutStream(chanend c_in) {
-    int res;
-    uchar line[IMWD];
+    int res;           // Result of reading in a PGM file.
+    uchar line[IMWD];  // A line to be written out.
 
     //Open PGM file.
     printf("DataOutStream: Start...\n" );
@@ -508,7 +519,7 @@ void DataOutStream(chanend c_in) {
 void orientation( client interface i2c_master_if i2c, chanend toDist) {
     i2c_regop_res_t result;
     char status_data = 0;
-    int vertical = 0;
+    int vertical = 0;  // Whether the board is vertical or not.
 
     // Configure FXOS8700EQ.
     result = i2c.write_reg(FXOS8700EQ_I2C_ADDR, FXOS8700EQ_XYZ_DATA_CFG_REG, 0x01);
@@ -582,5 +593,5 @@ int main(void) {
         }
     }
 
-  return 0;
+    return 0;
 }
