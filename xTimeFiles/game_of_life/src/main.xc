@@ -1,4 +1,4 @@
-// COMS20001 - Cellular Automaton Farm - Geometric Parallelism
+// COMS20001 - Cellular Automaton Farm - Geometric Parallelism (Bytes)
 // (using the XMOS i2c accelerometer demo code)
 
 #include <platform.h>
@@ -160,7 +160,6 @@ double getCurrentTime() {
 /////////////////////////////////////////////////////////////////////////////////////////
 void printStatusReport(double totalTime, int rounds, uchar image[IMWD][IMHT], int final) {
     int alive = countLiveCells(image);  // The number of live cells in the image.
-    //double time = current - start;      // Total time elapsed.
 
     printf("\n----------------------------------\n");
     if (final) {
@@ -216,11 +215,11 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
     // Processing the rounds.
     printf("\nProcessing...\n");
-    int rounds = 0;                     // The number of rounds processed.
-    int running = 1;                    // Whether to keep running.
-    double start = getCurrentTime();    // Start time of processing.
-    double current = getCurrentTime();  // Time after processing a round.
-    double totalTime = 0;
+    int rounds = 0;        // The number of rounds processed.
+    int running = 1;       // Whether to keep running.
+    double start;          // Start time of processing a round.
+    double current;        // Time after processing a round.
+    double totalTime = 0;  // Total time spent processing rounds.
 
     while (running) {
 
@@ -326,6 +325,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     }
                     current = getCurrentTime();
 
+                    // Adjustment for max timer value.
                     if (current < start) {
                         current += 42.94967295;  // (2^32)-1 / 100000000 (max timer value in seconds)
                     }
@@ -550,5 +550,5 @@ int main(void) {
 
     }
 
-  return 0;
+    return 0;
 }
