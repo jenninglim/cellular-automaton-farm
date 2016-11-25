@@ -15,6 +15,10 @@
 
 #define WORKERS 4  // Total number of workers processing the image.
 
+// Image paths.
+char infname[]  = "64x64.pgm";      // Input image path
+char outfname[] = "64x64out.pgm";   // Output image path
+
 // Port to access xCORE-200 buttons.
 on tile[0]: in port buttons = XS1_PORT_4E;
 // Buttons signals.
@@ -47,9 +51,6 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-// Image paths.
-char infname[]  = "64x64.pgm";      // Input image path
-char outfname[] = "64x64out.pgm";   // Output image path
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -272,7 +273,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     // SEGHT rows are sent to a worker at a time (FARMING PARALLELISM).
                     int workerRow[WORKERS];   // The rows that the workers are currently analysing.
 
-                    // SENDING THE INITIAL ROWS TO EACH WORKER.
+                    // Sending the initial rows to each worker.
                     int y = 0;             // Row reference.
                     int w = 0;             // The worker receiving a pixel.
                     int segmentsSent = 0;  // Total number of image segments sent to the workers.
@@ -301,7 +302,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                     }
                     */
 
-                    // RECEIVING UPDATES AND FARMING OUT MORE ROWS.
+                    // Receiving updates and farming out more rows.
                     int segmentsReceived = 0;  // The total number of worker segments received.
                     while (segmentsReceived < IMHT / SEGHT) {
                         select {
@@ -447,7 +448,7 @@ void worker(chanend c_fromDist) {
     uchar pixel;                       // A single pixel in the image.
 
     while (1) {
-        // READ IN IMAGE SEGMENT FROM DISTRIBUTOR.
+        // Read an image segment from distributor.
         for (int y = 0; y < SEGHT + 2; y++) {
             for (int x = 0; x < IMWD + 2; x++) {
                 c_fromDist :> pixel;
@@ -459,7 +460,7 @@ void worker(chanend c_fromDist) {
         // are prioritised over others in select statements if more than one waiting to be read in.
         // waitForSeconds(1);
 
-        // ANALYSE IMAGE SEGMENT FOR POTENTIAL CHANGES FOR NEXT ROUND.
+        // Analyse image segment for potential changes for next round.
         // Skip the top and bottom rows as they are boundaries provided for info only.
         for (int y = 1; y < SEGHT + 1; y++) {
             // Skip the first and last columns as they are boundaries provided for info only.
