@@ -1,4 +1,4 @@
-// COMS20001 - Cellular Automaton Farm - Initial Code Skeleton
+// COMS20001 - Cellular Automaton Farm - Geometric Farming (Hybrid) using bit compression.
 // (using the XMOS i2c accelerometer demo code)
 
 #include <platform.h>
@@ -9,23 +9,23 @@
 #include "i2c.h"
 
 /*
- * IMHT           16    32   64    128   256   512
- * IMWD           16    32   64    128   256   512
+ * IMHT           16    32   64    128   256   512   1200    2048   1280
+ * IMWD           16    32   64    128   256   512   1200    2048   1280
  *
- * SPLITWIDTH       1    1    2      3    5    9
- * UINTARRAYWIDTH   1    2    3      5    9    18
+ * SPLITWIDTH       1    1    2      3    5    9       20      35     22
+ * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43
  */
-#define  IMHT 64                   //image height
-#define  IMWD 64                   //image width
+#define  IMHT 512                         //image height
+#define  IMWD 512                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH     2            //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 3            //ceil(IMWD / 30)
-#define RUNUNTIL     3000                //for debug
+#define SPLITWIDTH     9                 //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 18                 //ceil(IMWD / 30)
+#define RUNUNTIL     1000                //for debug
 
 //Number of ...
-#define NUMBEROFWORKERS 3           //Workers
-#define NUMBEROFSUBDIST 2           //Sub-Distributors.
+#define NUMBEROFWORKERS 3               //Workers
+#define NUMBEROFSUBDIST 2               //Sub-Distributors.
 
 //Signals sent from master to sub distributors. State of the farm.
 #define CONTINUE 0
@@ -33,15 +33,15 @@
 #define STOP     2
 
 // Buttons signals.
-#define SW2 13                      // SW2 button signal.
-#define SW1 14                      // SW1 button signal.
+#define SW2 13                          // SW2 button signal.
+#define SW1 14                          // SW1 button signal.
 
 // LED signals.
-#define OFF  0                      // Signal to turn the LED off.
-#define GRNS 1                      // Signal to turn the separate green LED on.
-#define BLU  2                      // Signal to turn the blue LED on.
-#define GRN  4                      // Signal to turn the green LED on.
-#define RED  8                      // Signal to turn the red LED on.
+#define OFF  0                          // Signal to turn the LED off.
+#define GRNS 1                          // Signal to turn the separate green LED on.
+#define BLU  2                          // Signal to turn the blue LED on.
+#define GRN  4                          // Signal to turn the green LED on.
+#define RED  8                          // Signal to turn the red LED on.
 
 // Interface ports to orientation
 on tile[0]: port p_scl = XS1_PORT_1E;
@@ -65,10 +65,10 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-typedef unsigned char uchar;        //using uchar as shorthand
+typedef unsigned char uchar;          //using uchar as shorthand
 
-char infname[] = "64x64.pgm";     //put your input image path here
-char outfname[] = "64x64(1000).pgm"; //put your output image path here
+char infname[] = "512x512.pgm";         //put your input image path here
+char outfname[] = "512x512(1000).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -79,7 +79,7 @@ double getCurrentTime() {
     double time;
     timer t;
     t :> time;
-    time /= 100000000;              // Convert to seconds.
+    time /= 100000000;                 // Convert to seconds.
     return time;
 }
 
@@ -101,9 +101,10 @@ void printStatusReport(double totalTime, int rounds, int liveCells, int final) {
     printf("Rounds Processed: %d\n"
            "Live Cells: %d / %d\n"
            "Time Elapsed: %.4lf seconds\n"
+           "Average Time/Round: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           rounds, liveCells, IMHT*IMWD, totalTime, NUMBEROFWORKERS);
+           rounds, liveCells, IMHT*IMWD, totalTime, totalTime / rounds, NUMBEROFWORKERS);
 }
 
 
@@ -138,17 +139,17 @@ int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
-    int r;  // Received button signal.
-    uchar sw1Pressed = 0;
+    int r;                                     // Received button signal.
+    uchar sw1Pressed = 0;                      // Has button been pressed before?
     while (1) {
         b when pinseq(15)  :> r;               // Check that no button is pressed.
         b when pinsneq(15) :> r;               // Check if some buttons are pressed.
-        if (r == SW1 && sw1Pressed == 0) {     // If either button is pressed/e3q2w
-            c_toDataIn <: r;                   // send button pattern to distributor.
+        if (r == SW1 && sw1Pressed == 0) {     // If SW1 pressed, and not pressed before.
+            c_toDataIn <: r;                   // send button pattern to dataInStream.
             sw1Pressed = 1;
         }
         if (r == SW2 && sw1Pressed) {
-            c_toDist   <: r;
+            c_toDist   <: r;                    //// send button pattern to distributor.
         }
     }
 }
@@ -160,12 +161,8 @@ void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 uchar getBit(uint32_t queriedInt, uchar index) {
-    if ( (queriedInt & 0x00000001 << (31 - index)) == 0 ) {
-        return 0;
-    }
-    else {
-        return 255;
-    }
+    if ( (queriedInt & 0x00000001 << (31 - index)) == 0 ) { return 0; }
+    else { return 255; }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -180,18 +177,6 @@ uint32_t numberOfAliveCells(uint32_t cells, uchar length) {
         if (getBit(cells, i) == 255) { count++; }
     }
     return count;
-}
-
-//for debug
-void printBinary(uint32_t queriedInt, uchar length) {
-    for (int i = 0; i < length; i ++) {
-        if ( (queriedInt & 0x00000001 << (30 - i)) == 0 ) {
-            printf("0 ");
-        }
-        else {
-            printf("1 ");
-        }
-    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -370,7 +355,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
 
             case fromAcc :> val:
                 printf("Tilted Board\n");
-                if (val == 1) { state = 1; c_toLEDs <: RED;  }
+                if (val == 1 && state == CONTINUE) { state = CONTINUE; c_toLEDs <: RED;  }
                 break;
 
             case c_subDist[int i] :> val:
@@ -475,11 +460,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   uchar readIn = 1;                    //boolean for reading in files.
   uchar safe = 0;                      // safe to send to workers
 
-  int distColsReceived = 0;   //number of columns received from the distributor.
-  int distRowsReceived = 0;  //numbers of rows received from the distributor
+  int distColsReceived = 0;            //number of columns received from the distributor.
+  int distRowsReceived = 0;            //numbers of rows received from the distributor
 
-  int actualWidth = 0; // actual width of the array used.
-  int val = 0;
+  int actualWidth = 0;                 // actual width of the array used.
+  int val = 0;                         // input value from c_in or c_toWorkers.
   uchar length = 0;
 
   /*
@@ -489,16 +474,16 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
    */
   int index[NUMBEROFWORKERS][2];
 
-  uchar state = 0;            // boolean for pause state
-  uchar nextTurn = 0;         //boolean for next Turn
+  uchar state = 0;                     // boolean for pause state
+  uchar nextTurn = 0;                  //boolean for next Turn
 
-  int workerColsReceived = 0; //number of columns received from workers
-  int workerRowsReceived = 0; //number of rows received from workers
+  int workerColsReceived = 0;          //number of columns received from workers
+  int workerRowsReceived = 0;          //number of rows received from workers
 
-  int workerColsSent = 0;     //number of columns sent to the worker. l
-  int workerRowsSent = 0;     //number of rows sent to the worker. k
+  int workerColsSent = 0;              //number of columns sent to the worker. l
+  int workerRowsSent = 0;              //number of rows sent to the worker. k
 
-  uchar workersStarted = 0;   //number of workers starting to work
+  uchar workersStarted = 0;            //number of workers starting to work
 
   //initialise array
   for (int i = 0; i < NUMBEROFWORKERS; i ++) {
@@ -517,8 +502,8 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (state != STOP) {
-      if (distRowsReceived == IMHT) { readIn = 0; }                               //finished readIn!
-      if (workerRowsSent == IMHT && workerRowsReceived == IMHT) { nextTurn = 1; } //next turn!!
+      if (distRowsReceived == IMHT) { readIn = 0; }                               // finished reading in
+      if (workerRowsSent == IMHT && workerRowsReceived == IMHT) { nextTurn = 1; } // finished processing current turn
 
       // starts to work the workers.
       if (safe && workersStarted < NUMBEROFWORKERS) {
@@ -533,13 +518,14 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
 
       //Various if conditions for unsafe working of worker.
-      if (readIn) { /*
+      if (readIn) {
           if (workerRowsSent + 2 < distRowsReceived ) {
               safe = 1;
           }
-          else { safe = 0; } */
+          else { safe = 0; }
       }
       else { safe = 1; }
+
       select {
         //case when receiving from the (main distributor).
         case c_in :> val:
@@ -571,14 +557,16 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
         default:
             if (nextTurn){
-                //letting distributor know (this) is ready
+                //letting main distributor know (this) is ready
                 c_in <: 1;
                 c_in :> val;
+
+
                 if (val == 0)      { state = CONTINUE; }
                 else if (val == 1) { state = PAUSE; }
                 else if (val == 2) { state = STOP; }
 
-                //send edges cases when not paused.
+                //send "edges cases" to assign its edges when not paused.
                 if (state == CONTINUE) {
                     //logic for sending edges
                     for (int i = 0; i < IMHT; i++){
@@ -593,7 +581,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                             linePart[j][i] = val;
                         }
 
-                        //when actualWidth == 1 we have a problem
+                        //Gives the edges back to the distributors.
                         c_in <: linePart[0][i];
                         c_in <: linePart[actualWidth - 1][i];
                         c_in :> linePart[0][i];
@@ -635,11 +623,12 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 /////////////////////////////////////////////////////////////////////////////////////////
 uchar deadOrAlive(uchar state, uchar count) {
     uchar newState = state;
+    //If alive...
     if (state == 255) {
-        if (count < 2 || count > 3) { newState = 0; }
+        if (count < 2 || count > 3) { newState = 0; }   //Now dead.
     }
-    // If dead
-    else if (count == 3) { newState = 255; } // Now alive.
+    // If dead...
+    else if (count == 3) { newState = 255; }            // Now alive.
     return newState;
 }
 
@@ -661,20 +650,18 @@ uchar isTwoFiveFive(uchar input) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void worker(chanend c_fromDist) {
-    uint32_t lines[3];
-    uchar results[30];
-    uchar count = 0;
-    uchar state = 0;
+    uint32_t lines[3];              //input from the distributor.
+    uchar results[30];              //records the results.
+    uchar count = 0;                //number of neighbours for each cell.
+    uchar state = 0;                //the current state (alive or dead) of the cell.
+    uint32_t output = 0;
     while (1) {
-        for (int i = 0; i < 3; i++) {
-
-            c_fromDist :> lines[i];
-        }
-        for (int j = 1; j < 31; j++) { // goes through each bit in the input
+        for (int i = 0; i < 3; i++) { c_fromDist :> lines[i]; } //receiving work from distributors.
+        for (int j = 1; j < 31; j++) {                          // goes through each bit in the input
             count = 0;
             state = 0;
             results[j - 1] = 0;
-            for (int i = 0; i < 3; i++) { // goes through each row
+            for (int i = 0; i < 3; i++) {                       // goes through each row
                 count = count + isTwoFiveFive(getBit(lines[i], j + 1));
                 count = count + isTwoFiveFive(getBit(lines[i], j - 1));
                 if (i != 1) {
@@ -684,10 +671,9 @@ void worker(chanend c_fromDist) {
                     state = getBit(lines[i], j);
                 }
             }
-            results[j - 1] = deadOrAlive(state, count);
+            results[j - 1] = deadOrAlive(state, count);         //assigns the result to uchar.
         }
-        uint32_t output = 0;
-        output = compress(results, 30);
+        output = compress(results, 30);                         //compresses the results.
         c_fromDist <: output;
     }
 }
@@ -783,29 +769,29 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 /////////////////////////////////////////////////////////////////////////////////////////
 int main(void) {
 
-i2c_master_if i2c[1];               //interface to orientation
+i2c_master_if i2c[1];                                               //interface to orientation
 
-chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
-chan c_workers[NUMBEROFWORKERS];     // Worker channels (one for each worker).
-chan c_otherWorkers[NUMBEROFWORKERS];
+chan c_inIO, c_outIO, c_control;                                    //extend your channel definitions here
+chan c_workers[NUMBEROFWORKERS];                                    // Worker channels (one for each worker)  for sub distributor 0.
+chan c_otherWorkers[NUMBEROFWORKERS];                               // Worker channels (one for each workder) for sub distributor 1.
 chan c_buttonsToDist, c_distToLEDs, c_buttonsToData, c_dataToLEDs;  // Button and LED channels.
 chan c_subDist[NUMBEROFSUBDIST];
 
 par {
-    on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing orientation data
-    on tile[1]: orientation(i2c[0],c_control);        //client thread reading orientation data
+    on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
+    on tile[1]: orientation(i2c[0],c_control);                                         //client thread reading orientation data
     on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData, c_dataToLEDs);          //thread to read in a PGM image
-    on tile[1]: DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    on tile[1]: mainDistributor(c_buttonsToDist, c_distToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);
-    on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);//thread to coordinate work on image
-    on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);//thread to coordinate work on image
-    par (int i = 0; i < NUMBEROFWORKERS; i++){ //making workers
-        on tile[1]: worker(c_workers[i]);                  // thread to do work on an image.
+    on tile[1]: DataOutStream(outfname, c_outIO);                                      //thread to write out a PGM image
+    on tile[1]: mainDistributor(c_buttonsToDist, c_distToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);   //thread to coorinate work to coordinators.
+    on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);              //thread to coordinate work on image
+    on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);         //thread to coordinate work on image
+    par (int i = 0; i < NUMBEROFWORKERS; i++){                                         //starting workers
+        on tile[1]: worker(c_workers[i]);                                              // thread to do work on an image.
         on tile[0]: worker(c_otherWorkers[i]);
     }
 
-    on tile[0]: buttonListener(buttons,c_buttonsToData, c_buttonsToDist);  // Thread to listen for button presses.
-    on tile[0]: showLEDs(leds, c_distToLEDs, c_dataToLEDs);              // Thread to process LED change requests.
+    on tile[0]: buttonListener(buttons,c_buttonsToData, c_buttonsToDist);              // Thread to listen for button presses.
+    on tile[0]: showLEDs(leds, c_distToLEDs, c_dataToLEDs);                            // Thread to process LED change requests.
   }
 
   return 0;
