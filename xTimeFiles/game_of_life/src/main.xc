@@ -14,6 +14,10 @@
 
 #define WORKERS 4  // Total number of workers processing the image.
 
+// Image paths.
+char infname[]  = "64x64.pgm";               // Input image path.
+char outfname[] = "64x64out(w4-r1000).pgm";  // Output image path.
+
 // Port to access xCORE-200 buttons.
 on tile[0]: in port buttons = XS1_PORT_4E;
 // Buttons signals.
@@ -46,9 +50,6 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-// Image paths.
-char infname[]  = "64x64.pgm";               // Input image path.
-char outfname[] = "64x64out(w4-r1000).pgm";  // Output image path.
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -267,7 +268,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
                         c_toLEDs <: OFF;
                     }
 
-                    // SENDING THE IMAGE TO THE WORKERS.
+                    // Sending the image to the workers.
                     // The image is split vertically (using GEOMETRIC PARALLELISM).
                     for (int y = 0; y < IMHT; y++) {
                         int overlap = 1;  // Boundary overlap counter.
@@ -300,7 +301,7 @@ void distributor(chanend c_fromButtons, chanend c_toLEDs, chanend c_in, chanend 
 
                     }
 
-                    // RECEIVING UPDATES FROM THE WORKERS.
+                    // Receiving updates from the workers.
                     int x[WORKERS];  // Each worker's x coordinate to update in the new image.
                     int y[WORKERS];  // Each worker's y coordinate to update in the new image.
                     for (int i = 0; i < WORKERS; i++) {
@@ -408,7 +409,7 @@ void worker(chanend c_fromDist, int workerNum) {
 
     while (1) {
 
-        // READ IN IMAGE SEGMENT FROM DISTRIBUTOR.
+        // Read in image segment from distributor.
         for (int y = 0; y < IMHT; y++) {
             for (int x = 0; x < segWD; x++) {
                 c_fromDist :> pixel;
@@ -416,7 +417,7 @@ void worker(chanend c_fromDist, int workerNum) {
             }
         }
 
-        // ANALYSE IMAGE SEGMENT FOR POTENTIAL CHANGES FOR NEXT ROUND.
+        // Analyse image segment for potential changes for next round.
         for (int y = 0; y < IMHT; y++) {
             // Skip the first and last columns as they are boundaries provided for info only.
             for (int x = 1; x < (segWD - 1); x++) {
