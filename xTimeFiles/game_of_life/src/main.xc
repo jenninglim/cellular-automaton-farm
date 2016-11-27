@@ -9,18 +9,17 @@
 #include "i2c.h"
 
 /*
- * IMHT           16    32   64    128   256   512   1200    2048   1280
- * IMWD           16    32   64    128   256   512   1200    2048   1280
+ * IMHT           16    32   64    128   256   512   1200    2048   1280    1024
  *
- * SPLITWIDTH       1    1    2      3    5    9       20      35     22
- * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43
+ * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
+ * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 32                         //image height
-#define  IMWD 32                         //image width
+#define  IMHT 30                         //image height
+#define  IMWD 1024                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH     1                 //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 2                 //ceil(IMWD / 30)
+#define SPLITWIDTH     18                 //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 35                 //ceil(IMWD / 30)
 #define RUNUNTIL     1000                //for debug
 
 //Number of ...
@@ -67,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "32x32.pgm";         //put your input image path here
-char outfname[] = "32x32(1000).pgm";  //put your output image path here
+char infname[] = "30x1024.pgm";         //put your input image path here
+char outfname[] = "30x1024(1000).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -354,8 +353,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 break;
 
             case fromAcc :> val:
-                printf("Tilted Board\n");
-                if (val == 1 && state == CONTINUE) { state = CONTINUE; c_toLEDs <: RED;  }
+                if (val == 1 && state == CONTINUE) { state = PAUSE; c_toLEDs <: RED;  }
                 break;
 
             case c_subDist[int i] :> val:
