@@ -14,16 +14,16 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 64                         //image height
-#define  IMWD 64                         //image width
+#define  IMHT 512                         //image height
+#define  IMWD 512                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH     2                 //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 3                 //ceil(IMWD / 30)
-#define RUNUNTIL       1                //for debug
+#define SPLITWIDTH     9                 //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 18                 //ceil(IMWD / 30)
+#define RUNUNTIL       10                //for debug
 
 //Number of ...
-#define NUMBEROFWORKERS 3               //Workers
+#define NUMBEROFWORKERS 2               //Workers
 #define NUMBEROFSUBDIST 2               //Sub-Distributors.
 
 //Signals sent from master to sub distributors. State of the farm.
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "64x64.pgm";         //put your input image path here
-char outfname[] = "64x64(1).pgm";  //put your output image path here
+char infname[] = "512x512.pgm";         //put your input image path here
+char outfname[] = "512x512(1-2).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -103,7 +103,7 @@ void printStatusReport(double totalTime, int rounds, int liveCells, int final) {
            "Average Time/Round: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           rounds, liveCells, IMHT*IMWD, totalTime, totalTime / rounds, NUMBEROFWORKERS);
+           rounds, liveCells, IMHT*IMWD, totalTime, totalTime / rounds, NUMBEROFWORKERS * 2);
 }
 
 
@@ -375,6 +375,8 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                 else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; c_toLEDs <: RED;  }
                 else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; c_toLEDs <: BLU;  } // Turn ON the blue LED to indicate export of the image has STARTED.
 
+                start = getCurrentTime(); //start timer.
+
                 //if CONTINUE, receive images edges from sub distributor to be assigned edges.
                 if (state == CONTINUE) {
                     turn++ ; //increment turn.
@@ -403,7 +405,6 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                             c_subDist[1] <: edges[j+2];
                         }
                      }
-                    start = getCurrentTime();
                     c_toLEDs <: GRNS;
                 }
                 else {
@@ -516,13 +517,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
 
       //Various if conditions for unsafe working of worker.
-      if (readIn) { /*
-          if (workerRowsSent + 2 < distRowsReceived ) {
-              safe = 1;
-          }
-          else { safe = 0; } */
-      }
-      else { safe = 1; }
+      if (!readIn) { safe = 1; }
 
       select {
         //case when receiving from the (main distributor).
