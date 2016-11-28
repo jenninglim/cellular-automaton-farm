@@ -14,13 +14,13 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 30                         //image height
-#define  IMWD 1024                         //image width
+#define  IMHT 64                         //image height
+#define  IMWD 64                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH     18                 //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 35                 //ceil(IMWD / 30)
-#define RUNUNTIL     1000                //for debug
+#define SPLITWIDTH     2                 //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 3                 //ceil(IMWD / 30)
+#define RUNUNTIL       1                //for debug
 
 //Number of ...
 #define NUMBEROFWORKERS 3               //Workers
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "30x1024.pgm";         //put your input image path here
-char outfname[] = "30x1024(1000).pgm";  //put your output image path here
+char infname[] = "64x64.pgm";         //put your input image path here
+char outfname[] = "64x64(1).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -516,11 +516,11 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
 
       //Various if conditions for unsafe working of worker.
-      if (readIn) {
+      if (readIn) { /*
           if (workerRowsSent + 2 < distRowsReceived ) {
               safe = 1;
           }
-          else { safe = 0; }
+          else { safe = 0; } */
       }
       else { safe = 1; }
 
