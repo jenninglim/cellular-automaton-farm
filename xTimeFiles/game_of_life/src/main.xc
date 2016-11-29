@@ -471,16 +471,24 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   uint32_t linePart[SPLITWIDTH][IMHT]; //stores processing image
   uint32_t copyPart[SPLITWIDTH][IMHT]; //stores results.
   uchar readIn = 1;                    //boolean for reading in files.
-  int count = 0;
 
-  int edgesColsSent = 0;
+  int edgesColsSent = 0;                //sent from worker
   int edgesRowsSent = 0;
 
-  int edgesRowsReceived = 0;
-  int edgesColsReceived = 0;
+  int edgesRowsReceived = 0;           //recieved from main distributor
+  int edgesColsReceived = 0;           //recieved from main distributor
+
+  int workerEdgeColsReceived =0;        //received from worker
+  int workerEdgeRowsReceived =0;
 
   int distColsReceived = 0;            //number of columns received from the distributor.
   int distRowsReceived = 0;            //numbers of rows received from the distributor
+
+  int workerColsReceived = 0;          //number of columns received from workers
+  int workerRowsReceived = 0;          //number of rows received from workers
+
+  int workerColsSent = 0;              //number of columns sent to the worker. l
+  int workerRowsSent = 0;              //number of rows sent to the worker. k
 
   int actualWidth = 0;                 // actual width of the array used.
   int val = 0;                         // input value from c_in or c_toWorkers.
@@ -499,12 +507,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
   uchar state = 0;                     // boolean for pause state
   uchar nextTurn = 0;                  //boolean for next Turn
-
-  int workerColsReceived = 0;          //number of columns received from workers
-  int workerRowsReceived = 0;          //number of rows received from workers
-
-  int workerColsSent = 0;              //number of columns sent to the worker. l
-  int workerRowsSent = 0;              //number of rows sent to the worker. k
 
   uchar workersWorking = 0;            //number of workers starting to work
 
@@ -526,43 +528,60 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //This just inverts every pixel, but you should
   //change the image according to the "Game of Life"
   while (state != STOP) {
-      if (distRowsReceived == IMHT && edgesRowsReceived == IMHT) { readIn = 0; }                               // finished reading in
-      if (workerRowsSent == IMHT && workerRowsReceived == IMHT && edgesRowsSent == IMHT && edgesRowsReceived == IMHT) { nextTurn = 1; } // finished processing current turn
-      if (workersWorking < NUMBEROFWORKERS) {
+      if (actualWidth == 1 || actualWidth == 2) {
+          if (edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && readIn == 0) { nextTurn = 1; printf("stop\n"); } // finished processing current turn
+      }
+      else {
+          if (workerRowsSent == IMHT && edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && workerRowsReceived == IMHT  && readIn == 0) { nextTurn = 1; printf("stop\n"); } // finished processing current turn
+      }
+      if (nextTurn == 0 && workersWorking < NUMBEROFWORKERS) {
           freeWorker = findFreeWorker(workerState);
-          if (readIn) {
-              index[freeWorker][0] = workerColsSent % actualWidth;
-              index[freeWorker][1] = (workerRowsSent + 1) % IMHT;
-              workerColsSent ++;
-              if (workerColsSent % actualWidth == 0) { workerRowsSent ++; }
+          if (actualWidth > 2) {
+              // priorities edges
+              if (edgesColsSent <= edgesColsReceived - 4 || (edgesColsReceived == IMHT && edgesRowsSent < IMHT)) {
+                  index[freeWorker][0] = (edgesColsSent % 2) * (actualWidth - 1);
+                  index[freeWorker][1] = edgesRowsSent;
+                  edgesColsSent++;
+                  if (edgesColsSent % 2 == 0) { edgesRowsSent++; }
+                  sent = 1;
+              }
+              else if (workerColsSent < workerColsReceived - 2 * (actualWidth - 2) || (workerColsReceived == IMHT && workerColsSent < IMHT)){
+                  index[freeWorker][0] = (workerColsSent) % (actualWidth - 2);
+                  index[freeWorker][1] = workerRowsSent;
+                  workerColsSent++;
+                  if (workerColsSent % (actualWidth - 2) == 0) { workerRowsSent++; }
+                  sent = 1;
+              }
+              //if no rows sent then process image.
+
           }
-          else {
-              if (actualWidth > 1) {
-                  // priorities edges
-                  if (edgesColsSent <= edgesColsReceived - 4) {
-                      index[freeWorker][0] = edgesColsSent % 2;
-                      index[freeWorker][1] = edgesRowsSent;
-                      sent = 1;
-                  }
-                  else if (workerColsSent <= workerColsReceived - 2 * (actualWidth - 2)) {
-                      index[freeWorker][0] = (workerColsSent + 1) % (actualWidth - 2);
-                      index[freeWorker][1] = workerRowsSent;
-                  }
-                  //if no rows sent then process image.
+          else if (actualWidth == 1 ){                    //the edge case where the distributor only has one column.
+              if (edgesColsSent <= edgesColsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
+                  index[freeWorker][0] = 0;
+                  index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
+                  edgesColsSent++;
+                  edgesRowsSent++;
+                  sent = 1;
 
               }
-              else {                    //the edge case where the distributor only has one column.
-                  if (edgesColsSent <= edgesColsReceived - 2) {
-                      index[freeWorker][0] = 0;
-                      index[freeWorker][1] = edgesRowsSent;
-                      sent = 1;
-                  }
+          }
+          else if (actualWidth == 2) {
+              if (edgesColsSent <= edgesColsReceived - 4 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
+                  index[freeWorker][0] = edgesColsSent % 2;
+                  index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
+                  edgesColsSent++;
+                  if (edgesColsSent % 2 == 0 ) { edgesRowsSent++; }
+                  sent = 1;
               }
+          }
+          if (actualWidth == 1) {
+              //printf("%d,%d,%d\n",index[freeWorker][0], index[freeWorker][1], sent );
           }
           if (sent == 1) {
               for (int x = 0; x < 3 ; x++) {
-                  c_toWorker[workersWorking] <: linePart[index[workersWorking][0]][(index[freeWorker][1] - 1 + x + IMHT) % IMHT];
+                  c_toWorker[freeWorker] <: linePart[index[freeWorker][0]][(index[freeWorker][1] - 1 + x + IMHT) % IMHT];
               }
+              workerState[freeWorker] = 1;
               workersWorking ++;
               sent = 0;
           }
@@ -582,15 +601,41 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
         //case when receiving from the (main distributor).
         case c_in :> val:
             if (readIn) {
-                count ++;
-                linePart[distColsReceived % actualWidth][distRowsReceived] = val;
-                distColsReceived ++;
-                if (distColsReceived % actualWidth == 0) { distRowsReceived ++; }
+
+                if (actualWidth == 1) {
+                    linePart[0][edgesRowsReceived] = val;
+                    edgesColsReceived ++;
+                    edgesRowsReceived++;
+                }
+                else if (actualWidth == 2) {
+                    linePart[(edgesColsReceived % 2)][edgesRowsReceived] = val;
+                    edgesColsReceived ++;
+                    if (edgesColsReceived % 2 == 0) { edgesRowsReceived++; }
+                }
+                else {
+                    if ((edgesColsReceived + distColsReceived) % (actualWidth - 2) == 0 || (edgesColsReceived + distColsReceived) % (actualWidth - 2) == actualWidth - 1) {
+                        linePart[(actualWidth - 1) * (edgesColsReceived % 2)][edgesRowsReceived] = val;
+                        edgesColsReceived ++;
+                        if (edgesColsReceived % 2 == 0) { edgesRowsReceived++; }
+                    }
+                    else {
+                        linePart[distColsReceived % actualWidth][distRowsReceived] = val;
+                        distColsReceived ++;
+                        if (distColsReceived % (actualWidth - 2) == 0) { distRowsReceived ++; }
+                    }
+                }
+                if (actualWidth < 3){
+                    if (edgesRowsReceived == IMHT) { readIn = 0; } //finish readIN
+                }
+                else {
+                    if (edgesRowsReceived == IMHT && distRowsReceived ==IMHT) { readIn = 0; } //finish readIN
+                }
+
             }
             else {
-                linePart[distColsReceived * (actualWidth - 1)][distRowsReceived] = val;
-                distColsReceived ++;
-                if (distColsReceived % 2) { distRowsReceived++; }
+                linePart[distColsReceived * (actualWidth - 1)][edgesColsReceived] = val;
+                edgesColsReceived ++;
+                if (edgesColsReceived % 2) { edgesRowsReceived++; }
             }
             break;
 
@@ -598,12 +643,20 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
         //case when receiving from the work.
         case c_toWorker[int i] :> copyPart[index[i][0]][index[i][1]]:
             workersWorking = workersWorking - 1;
+            workerState[i] = 0;
             if (index[i][0] == 0 || index[i][0] == actualWidth - 1) {
-                edgesColsReceived ++;
-                if (edgesRowsReceived % 2 == 0) { edgesRowsReceived ++; }
+                workerEdgeColsReceived ++;
+                if (actualWidth == 1) {
+                    if (workerEdgeColsReceived % 1 == 0) { workerEdgeRowsReceived ++; }
+
+                }
+                else {
+                    if (workerEdgeColsReceived % 2 == 0) { workerEdgeRowsReceived ++; }
+                }
             }
             else
             {
+                printf("here\n");
                 workerColsReceived++;
                 if (workerColsReceived % (actualWidth - 2) == 0) { workerRowsReceived ++; }
             }
