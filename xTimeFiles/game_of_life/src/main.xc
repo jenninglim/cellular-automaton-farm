@@ -20,7 +20,7 @@
 //the variables below must change when image size changes
 #define SPLITWIDTH     2                 //ceil(UINTARRAYWIDTH /2)
 #define UINTARRAYWIDTH 3                 //ceil(IMWD / 30)
-#define RUNUNTIL       2                //for debug
+#define RUNUNTIL       3                //for debug
 
 //Number of ...
 #define NUMBEROFWORKERS 2               //Workers
@@ -67,7 +67,7 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 typedef unsigned char uchar;           //using uchar as shorthand
 
 char infname[] = "64x64.pgm";         //put your input image path here
-char outfname[] = "64x64(2-4).pgm";  //put your output image path here
+char outfname[] = "64x64(3-4).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
