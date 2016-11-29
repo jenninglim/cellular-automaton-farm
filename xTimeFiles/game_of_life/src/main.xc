@@ -20,7 +20,7 @@
 //the variables below must change when image size changes
 #define SPLITWIDTH     2                 //ceil(UINTARRAYWIDTH /2)
 #define UINTARRAYWIDTH 3                 //ceil(IMWD / 30)
-#define RUNUNTIL       1                //for debug
+#define RUNUNTIL       3                //for debug
 
 //Number of ...
 #define NUMBEROFWORKERS 3               //Workers
@@ -529,7 +529,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
   //change the image according to the "Game of Life"
   while (state != STOP) {
       if (actualWidth == 1 || actualWidth == 2) {
-          if (edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && readIn == 0) { nextTurn = 1; printf("stop\n"); } // finished processing current turn
+          if (edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && readIn == 0) { nextTurn = 1;} // finished processing current turn
       }
       else {
           if (workerRowsSent == IMHT && edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && workerRowsReceived == IMHT  && readIn == 0) { nextTurn = 1; printf("stop\n"); } // finished processing current turn
@@ -556,7 +556,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
           }
           else if (actualWidth == 1 ){                    //the edge case where the distributor only has one column.
-              if (edgesColsSent <= edgesColsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
+              if (edgesRowsSent <= edgesRowsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
                   index[freeWorker][0] = 0;
                   index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
                   edgesColsSent++;
@@ -566,7 +566,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
               }
           }
           else if (actualWidth == 2) {
-              if (edgesColsSent <= edgesColsReceived - 4 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
+              if (edgesRowsSent <= edgesRowsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
                   index[freeWorker][0] = edgesColsSent % 2;
                   index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
                   edgesColsSent++;
@@ -586,16 +586,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
               sent = 0;
           }
       }
-      //Various if conditions for unsafe working of worker.
-      /*
-      if (readIn) {
-
-          if (workerRowsSent + 2 < distRowsReceived ) {
-              safe = 1;
-          }
-          else { safe = 0; }
-      }
-      else { safe = 1; } */
 
       select {
         //case when receiving from the (main distributor).
@@ -633,9 +623,14 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
 
             }
             else {
-                linePart[distColsReceived * (actualWidth - 1)][edgesColsReceived] = val;
-                edgesColsReceived ++;
-                if (edgesColsReceived % 2) { edgesRowsReceived++; }
+                linePart[0][edgesRowsReceived] = val;
+                c_in :> val;
+                linePart[actualWidth - 1][edgesRowsReceived] = val;
+                edgesRowsReceived++;
+                if (edgesRowsReceived < IMHT) {
+                    c_in <: copyPart[0][edgesRowsReceived];
+                    c_in <: copyPart[(actualWidth - 1)][edgesRowsReceived];
+                }
             }
             break;
 
@@ -656,7 +651,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
             }
             else
             {
-                printf("here\n");
                 workerColsReceived++;
                 if (workerColsReceived % (actualWidth - 2) == 0) { workerRowsReceived ++; }
             }
@@ -687,28 +681,8 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                             linePart[j][i] = val;
                         }
                     }
-                    c_in <: linePart[0][IMHT - 1];
-                    c_in <: linePart[actualWidth - 1][IMHT - 1];
-                    /*
-                    //logic for sending edges
-                    for (int i = 0; i < IMHT; i++){
-                        for (int j = 0; j < actualWidth; j++) {
-                            val = copyPart[j][i];
-                            if (j  < actualWidth - 1) {
-                               val = assignRightEdge(copyPart[j][i], 30, copyPart[j + 1][i]);
-                            }
-                            if (j > 0) {
-                                val = assignLeftEdge(copyPart[j - 1][i], 30, val);
-                            }
-                            linePart[j][i] = val;
-                        }
-
-                        //Gives the edges back to the distributors.
-                        c_in <: linePart[0][i];
-                        c_in <: linePart[actualWidth - 1][i];
-                        c_in :> linePart[0][i];
-                        c_in :> linePart[actualWidth - 1][i];
-                    }*/
+                    c_in <: linePart[0][0];
+                    c_in <: linePart[actualWidth - 1][0];
                 }
                 //sending image to main distributor.
                 if (state == PAUSE || state == STOP) {
@@ -723,6 +697,15 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     }
                 }
                 //reset variables for next turn.
+                edgesColsSent = 0;                //sent from worker
+                edgesRowsSent = 0;
+
+                edgesRowsReceived = 0;           //recieved from main distributor
+                edgesColsReceived = 0;           //recieved from main distributor
+
+                workerEdgeColsReceived =0;        //received from worker
+                workerEdgeRowsReceived =0;
+                edgesRowsReceived = 0;
                 distRowsReceived = 0;
                 distColsReceived = 0;
                 nextTurn = 0;
