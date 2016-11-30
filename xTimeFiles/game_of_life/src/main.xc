@@ -14,16 +14,16 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 512                         //image height
-#define  IMWD 512                         //image width
+#define  IMHT 128                         //image height
+#define  IMWD 128                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH     9                 //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 18                 //ceil(IMWD / 30)
+#define SPLITWIDTH     3                 //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 5                 //ceil(IMWD / 30)
 #define RUNUNTIL       1000                //for debug
 
 //Number of ...
-#define NUMBEROFWORKERS 2               //Workers
+#define NUMBEROFWORKERS 1               //Workers
 #define NUMBEROFSUBDIST 2               //Sub-Distributors.
 
 //Signals sent from master to sub distributors. State of the farm.
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "512x512.pgm";         //put your input image path here
-char outfname[] = "512x512(1000-4).pgm";  //put your output image path here
+char infname[] = "128x128.pgm";         //put your input image path here
+char outfname[] = "128x128(1000-4).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -106,45 +106,19 @@ void printStatusReport(double totalTime, int rounds, int liveCells, int final) {
            rounds, liveCells, IMHT*IMWD, totalTime, totalTime / rounds, NUMBEROFWORKERS * 2);
 }
 
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// DISPLAYS an LED pattern
-//
-/////////////////////////////////////////////////////////////////////////////////////////
-int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
-    int pattern;                     // 1st bit (1) ...separate green LED
-                                     // 2nd bit (2) ...blue LED
-                                     // 3rd bit (4) ...green LED
-                                     // 4th bit (8) ...red LED
-    while (1) {
-        select {
-            case fromDist :> pattern:
-                p <: pattern;
-                break;
-            case fromDataIn :> pattern:
-                p <: pattern;
-                break;
-        }
-        fromDist :> pattern;        // Receive new pattern from distributor.
-        p <: pattern;               // Send pattern to LED port.
-    }
-    return 0;
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // READ BUTTONS and send button pattern to distributor.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
+void buttonListener(in port b, chanend c_toDist) {
     int r;                                     // Received button signal.
     uchar sw1Pressed = 0;                      // Has button been pressed before?
     while (1) {
         b when pinseq(15)  :> r;               // Check that no button is pressed.
         b when pinsneq(15) :> r;               // Check if some buttons are pressed.
         if (r == SW1 && sw1Pressed == 0) {     // If SW1 pressed, and not pressed before.
-            c_toDataIn <: r;                   // send button pattern to dataInStream.
+            c_toDist <: r;                   // send button pattern to dataInStream.
             sw1Pressed = 1;
         }
         if (r == SW2 && sw1Pressed) {
@@ -238,24 +212,13 @@ uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend c_toLEDs)
+void DataInStream(char infname[], chanend c_out)
 {
   int res;
   uchar line[30];
   uint32_t row[UINTARRAYWIDTH];
   uchar length = 0;
-  int buttonPressed;  // The button pressed on the xCore-200 Explorer.
-  // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
-  printf( "Waiting for SW1 button press...\n" );
-  int initiated = 0;  // Whether processing has been initiated.
 
-  while (!initiated) { //wait until SW1 button has been pressed.
-      c_fromButtons :> buttonPressed;
-      if (buttonPressed == SW1) {
-          initiated = 1;
-          c_toLEDs <: GRN;
-      }
-  }
   printf( "DataInStream: Start...\n" );
 
   //Open PGM file
@@ -295,8 +258,6 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
       }
   }
 
-  c_toLEDs <: OFF;  // Turn OFF the green LED to indicate reading of the image has FINISHED.
-
   //Close PGM image file
   _closeinpgm();
   printf( "DataInStream: Done...\n" );
@@ -310,7 +271,7 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
+void mainDistributor(chanend c_fromButtons, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
     double start = 0;           // Start time for processing.
     double current = 0;         //time after processing a round.
@@ -323,6 +284,18 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
     uint32_t edges[4];      //store edges.
 
     int buttonPressed;  // The button pressed on the xCore-200 Explorer.
+
+    // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
+    printf( "Waiting for SW1 button press...\n" );
+    int initiated = 0;  // Whether processing has been initiated.
+
+    while (!initiated) { //wait until SW1 button has been pressed.
+        c_fromButtons :> buttonPressed;
+        if (buttonPressed == SW1) {
+            initiated = 1;
+            leds <: GRN;
+        }
+    }
 
     //sending distributors information about the array size to be used.
     c_subDist[0] <: (uint32_t) SPLITWIDTH;
@@ -339,6 +312,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
             }
         }
     }
+    leds <: OFF;
 
     //records the current time.
     start = getCurrentTime();
@@ -347,13 +321,13 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
         select {
             case c_fromButtons :> buttonPressed:
                 if (buttonPressed == SW2) {      //Export state.
-                    c_toLEDs <: BLU;
+                    leds <: BLU;
                     state = STOP;
                 }
                 break;
 
             case fromAcc :> val:
-                if (val == 1 && state == CONTINUE) { state = PAUSE; c_toLEDs <: RED;  }
+                if (val == 1 && state == CONTINUE) { state = PAUSE; leds <: RED;  }
                 break;
 
             case c_subDist[int i] :> val:
@@ -365,15 +339,20 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                     current += 42.94967295;
                 }
                 totalTime += current - start;
-                c_toLEDs <: OFF;
+                if (turn % 2 == 0) {
+                    leds <: OFF;
+                }
+                else {
+                    leds <: GRNS;
+                }
                 //printf( "\nRound %d completed...\n", turn);
 
                 if (turn == RUNUNTIL ) { state = STOP; } //for debug
 
                 //sending the automaton state to distributor.
-                if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; c_toLEDs <: GRNS; }
-                else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; c_toLEDs <: RED;  }
-                else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; c_toLEDs <: BLU;  } // Turn ON the blue LED to indicate export of the image has STARTED.
+                if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; }
+                else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; leds <: RED;  }
+                else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; leds <: BLU;  } // Turn ON the blue LED to indicate export of the image has STARTED.
 
                 start = getCurrentTime(); //start timer.
 
@@ -405,7 +384,6 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                             c_subDist[1] <: edges[j+2];
                         }
                      }
-                    c_toLEDs <: GRNS;
                 }
                 else {
                     for (int i = 0; i < IMHT; i ++) {
@@ -438,7 +416,7 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                         }
                     }
 
-                    if (state == STOP) { c_toLEDs <: OFF; }  // Turn OFF the green LED to indicate reading of the image has FINISHED.
+                    if (state == STOP) { leds <: OFF; }  // Turn OFF the green LED to indicate reading of the image has FINISHED.
                 }
                 break;
         }
@@ -767,24 +745,23 @@ i2c_master_if i2c[1];                                               //interface 
 chan c_inIO, c_outIO, c_control;                                    //extend your channel definitions here
 chan c_workers[NUMBEROFWORKERS];                                    // Worker channels (one for each worker)  for sub distributor 0.
 chan c_otherWorkers[NUMBEROFWORKERS];                               // Worker channels (one for each workder) for sub distributor 1.
-chan c_buttonsToDist, c_distToLEDs, c_buttonsToData, c_dataToLEDs;  // Button and LED channels.
+chan c_buttonsToDist;  // Button and LED channels.
 chan c_subDist[NUMBEROFSUBDIST];
 
 par {
     on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
     on tile[1]: orientation(i2c[0],c_control);                                         //client thread reading orientation data
-    on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData, c_dataToLEDs);          //thread to read in a PGM image
+    on tile[1]: DataInStream(infname, c_inIO);          //thread to read in a PGM image
     on tile[1]: DataOutStream(outfname, c_outIO);                                      //thread to write out a PGM image
-    on tile[1]: mainDistributor(c_buttonsToDist, c_distToLEDs , c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);   //thread to coorinate work to coordinators.
-    on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);              //thread to coordinate work on image
-    on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);         //thread to coordinate work on image
+    on tile[0]: mainDistributor(c_buttonsToDist, c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);   //thread to coorinate work to coordinators.
+    on tile[0]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);              //thread to coordinate work on image
+    on tile[1]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);         //thread to coordinate work on image
     par (int i = 0; i < NUMBEROFWORKERS; i++){                                         //starting workers
-        on tile[1]: worker(c_workers[i]);                                              // thread to do work on an image.
-        on tile[0]: worker(c_otherWorkers[i]);
+        on tile[0]: worker(c_workers[i]);                                              // thread to do work on an image.
+        on tile[1]: worker(c_otherWorkers[i]);
     }
 
-    on tile[0]: buttonListener(buttons,c_buttonsToData, c_buttonsToDist);              // Thread to listen for button presses.
-    on tile[0]: showLEDs(leds, c_distToLEDs, c_dataToLEDs);                            // Thread to process LED change requests.
+    on tile[0]: buttonListener(buttons, c_buttonsToDist);              // Thread to listen for button presses.
   }
 
   return 0;
