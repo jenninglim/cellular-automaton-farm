@@ -64,9 +64,9 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-typedef unsigned char uchar;           //using uchar as shorthand
+typedef unsigned char uchar;              //using uchar as shorthand
 
-char infname[] = "128x128.pgm";         //put your input image path here
+char infname[] = "128x128.pgm";           //put your input image path here
 char outfname[] = "128x128(1000-4).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
