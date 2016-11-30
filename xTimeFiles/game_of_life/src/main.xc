@@ -446,15 +446,16 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                         fromAcc :> val;
                         if (val == 0) {
                             state = CONTINUE;
-<<<<<<< HEAD
-=======
                             if (turn % 2 == 0) {
                                 leds <: OFF;
                             }
                             else {
                                 leds <: GRNS;
                             }
->>>>>>> 43bd60b2848734895af44b7ca1fd485671816c63
+                            c_subDist[0] :> val;
+                            c_subDist[1] :> val;
+                            c_subDist[0] <: CONTINUE;
+                            c_subDist[1] <: CONTINUE;
                         }
                     }
 
@@ -513,7 +514,6 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
 
   int actualWidth = 0;                 // actual width of the array used.
   int val = 0;                         // input value from c_in or c_toWorkers.
-  uchar length = 0;
 
   uchar workerState[NUMBEROFWORKERS];  //Store the state of the worker.
   uchar freeWorker = -1;
@@ -550,16 +550,18 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
   //change the image according to the "Game of Life"
   while (state != STOP) {
       if (actualWidth == 1 || actualWidth == 2) {
-          if (edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && readIn == 0) { nextTurn = 1;} // finished processing current turn
+          if (edgesRowsReceived == IMHT) { readIn = 0; }                                                // if finish read in
+          if (edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && readIn == 0) { nextTurn = 1; }  // if finished processing current turn
       }
       else {
-          if (workerRowsSent == IMHT && edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && workerRowsReceived == IMHT  && readIn == 0) { nextTurn = 1; } // finished processing current turn
+          if (edgesRowsReceived == IMHT && distRowsReceived ==IMHT) { readIn = 0; }                     // if finish read in
+          if (workerRowsSent == IMHT && edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && workerRowsReceived == IMHT  && readIn == 0) { nextTurn = 1; printf("done%d\n", actualWidth); } // finished processing current turn
       }
+      //Distribute work to workers.
       if (nextTurn == 0 && workersWorking < NUMBEROFWORKERS) {
           freeWorker = findFreeWorker(workerState);
-          // priorities edges
+          //Work on edges if possible.
           if (edgesRowsSent <= edgesRowsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
-
               index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
               edgesColsSent++;
               if (actualWidth == 1) {
@@ -572,16 +574,17 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
               }
               sent = 1;
           }
+          //else work on the rest of the image.
           if (sent == 0 && actualWidth > 2) {
-              if (workerColsSent < distRowsReceived - 2 * (actualWidth - 2) || (distRowsReceived == IMHT && workerRowsSent < IMHT)){
-                  index[freeWorker][0] = (workerColsSent) % (actualWidth - 2) + 1;
-                  index[freeWorker][1] = (workerRowsSent + 1) % IMHT;
+              if (workerColsSent < distRowsReceived - 2 * (actualWidth - 2) || (distRowsReceived == IMHT && workerRowsSent < IMHT)) {
                   workerColsSent++;
+                  index[freeWorker][0] = (workerColsSent) % (actualWidth - 2);
+                  index[freeWorker][1] = (workerRowsSent + 1) % IMHT;
                   if (workerColsSent % (actualWidth - 2) == 0) { workerRowsSent++; }
                   sent = 1;
               }
-              //if no rows sent then process image.
           }
+          //send image to worker (if available).
           if (sent == 1) {
               for (int x = 0; x < 3 ; x++) {
                   c_toWorker[freeWorker] <: linePart[index[freeWorker][0]][(index[freeWorker][1] - 1 + x + IMHT) % IMHT];
@@ -593,10 +596,10 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
       }
       [[ordered]]
       select {
-        //case when receiving from the (main distributor).
+        // Case when receiving from the (main distributor).
         case c_in :> val:
+            // Receiving image from main.
             if (readIn) {
-
                 if (actualWidth == 1) {
                     linePart[0][edgesRowsReceived] = val;
                     edgesColsReceived ++;
@@ -619,44 +622,38 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
                         if (distColsReceived % (actualWidth - 2) == 0) { distRowsReceived ++; }
                     }
                 }
-                if (actualWidth < 3){
-                    if (edgesRowsReceived == IMHT) { readIn = 0; } //finish readIN
-                }
-                else {
-                    if (edgesRowsReceived == IMHT && distRowsReceived ==IMHT) { readIn = 0; } //finish readIN
-                }
-
             }
+            // Receiving edges only.
             else {
-
                 edgesColsReceived ++;
                 linePart[0][edgesRowsReceived] = val;
                 c_in :> val;
-                edgesColsReceived ++;
                 linePart[actualWidth - 1][edgesRowsReceived] = val;
-                edgesRowsReceived++;
-                if (edgesRowsReceived < IMHT) {
+                edgesRowsReceived = edgesRowsReceived + 2;
+                if (edgesRowsReceived < IMHT) {                    // Sent more edges to main.
                     c_in <: linePart[0][edgesRowsReceived];
                     c_in <: linePart[(actualWidth - 1)][edgesRowsReceived];
                 }
             }
             break;
 
-        //when safe for worker to send back data.
-        //case when receiving from the work.
+        // When safe for worker to send back data.
+        // Case when receiving from the work.
         case c_toWorker[int i] :> copyPart[index[i][0]][index[i][1]]:
             workersWorking = workersWorking - 1;
             workerState[i] = 0;
+
+            // If received an edge.
             if (index[i][0] == 0 || index[i][0] == actualWidth - 1) {
                 workerEdgeColsReceived ++;
                 if (actualWidth == 1) {
-                    if (workerEdgeColsReceived % 1 == 0) { workerEdgeRowsReceived ++; }
-
+                    workerEdgeRowsReceived ++;
                 }
                 else {
                     if (workerEdgeColsReceived % 2 == 0) { workerEdgeRowsReceived ++; }
                 }
             }
+            // If received an image part.
             else
             {
                 workerColsReceived++;
@@ -666,17 +663,19 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
             break;
 
         default:
-            if (nextTurn){
-                //letting main distributor know (this) is ready
-                c_in <: 1;
-                c_in :> val;
+            while (nextTurn) {
+                printf("here\n");
+                c_in <: 1;                              // Letting main distributor know (this) is ready
+                c_in :> val;                            // Receiving "state" from main.
 
+                // Deciding what to do.
                 if (val == 0)      { state = CONTINUE; }
                 else if (val == 1) { state = PAUSE; }
                 else if (val == 2) { state = STOP; }
 
-                //send "edges cases" to assign its edges when not paused.
+                // When NOT paused.
                 if (state == CONTINUE) {
+                    // Assign edges to each part of the image.
                     for (int i = 0; i < IMHT; i++){
                         for (int j = 0; j < actualWidth; j++) {
                             val = copyPart[j][i];
@@ -689,36 +688,42 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
                             linePart[j][i] = val;
                         }
                     }
+
+                    // Send the edges to be assign its edge cases.
                     c_in <: linePart[0][0];
                     c_in <: linePart[actualWidth - 1][0];
                 }
-                //sending image to main distributor.
+
+                // Sending image to main.
                 if (state == PAUSE || state == STOP) {
                     for (int i = 0; i < IMHT; i ++) {
                         for (int j = 0; j < actualWidth; j ++) {
-                            length = 30;
-                            if (j == actualWidth - 1 ) { length = IMWD % 30; }
-                            // if end, send the image to main distributor.
                             c_in <: copyPart[j][i];
 
                         }
                     }
                 }
-                //reset variables for next turn.
-                edgesColsSent = 0;                //sent from worker
-                edgesRowsSent = 0;
 
-                edgesRowsReceived = 0;           //recieved from main distributor
-                edgesColsReceived = 0;           //recieved from main distributor
+                //Reset variables for next turn.
+                if (state == CONTINUE) {
 
-                workerEdgeColsReceived =0;        //received from worker
-                workerEdgeRowsReceived =0;
-                nextTurn = 0;
-                workerColsReceived = 0;
-                workerRowsReceived = 0;
-                workerColsSent = 0;
-                workerRowsSent = 0;
-                workersWorking = 0;
+                    edgesColsSent = 0;
+                    edgesRowsSent = 0;
+
+                    edgesRowsReceived = 0;
+                    edgesColsReceived = 0;
+
+                    workerEdgeColsReceived =0;
+                    workerEdgeRowsReceived =0;
+
+                    nextTurn = 0;
+
+                    workerColsReceived = 0;
+                    workerRowsReceived = 0;
+                    workerColsSent = 0;
+                    workerRowsSent = 0;
+                    workersWorking = 0;
+                }
             }
             break;
       }
@@ -883,23 +888,23 @@ int main(void) {
 i2c_master_if i2c[1];                                               //interface to orientation
 
  chan c_inIO;
- chan c_outIO, c_control;                                    //extend your channel definitions here
+ chan c_outIO, c_control;                                            //extend your channel definitions here
  chan c_workers[NUMBEROFWORKERS];                                    // Worker channels (one for each worker)  for sub distributor 0.
  chan c_otherWorkers[NUMBEROFWORKERS];                               // Worker channels (one for each workder) for sub distributor 1.
- chan c_buttonsToDist, c_buttonsToData;  // Button and LED channels.
- chan c_subDist[NUMBEROFSUBDIST];
+ chan c_buttonsToDist, c_buttonsToData;                              // Button and LED channels.
+ chan c_subDist[NUMBEROFSUBDIST];                                    // Channels for communicating between main distributor its slaves.
 
 par {
     on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
     on tile[1]: orientation(i2c[0],c_control);                                         //client thread reading orientation data
-    on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData);          //thread to read in a PGM image
+    on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData);                        //thread to read in a PGM image
     on tile[1]: DataOutStream(outfname, c_outIO);                                      //thread to write out a PGM image
     on tile[0]: mainDistributor(c_buttonsToDist, c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);   //thread to coorinate work to coordinators.
     on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);              //thread to coordinate work on image
     on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);         //thread to coordinate work on image
     par (int i = 0; i < NUMBEROFWORKERS; i++){                                         //starting workers
         on tile[1]: worker(c_workers[i]);                                              // thread to do work on an image.
-        on tile[0]: worker(c_otherWorkers[i]);
+        on tile[0]: worker(c_otherWorkers[i]);                                         // thread to do work on an image.
     }
 
     on tile[0]: buttonListener(buttons,c_buttonsToData, c_buttonsToDist);              // Thread to listen for button presses.
