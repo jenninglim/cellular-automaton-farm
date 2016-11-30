@@ -455,8 +455,6 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, s
                             else {
                                 leds <: GRNS;
                             }
-                            c_subDist[0] <: CONTINUE;
-                            c_subDist[1] <: CONTINUE;
                         }
                     }
 
