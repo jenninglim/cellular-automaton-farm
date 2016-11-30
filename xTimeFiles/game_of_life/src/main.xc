@@ -14,16 +14,16 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 256                         //image height
-#define  IMWD 256                         //image width
+#define  IMHT 128                         //image height
+#define  IMWD 128                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH     5                 //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH 9                 //ceil(IMWD / 30)
-#define RUNUNTIL       2                //for debug
+#define SPLITWIDTH     3                 //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH 5                 //ceil(IMWD / 30)
+#define RUNUNTIL       1000                //for debug
 
 //Number of ...
-#define NUMBEROFWORKERS 3               //Workers
+#define NUMBEROFWORKERS 2               //Workers
 #define NUMBEROFSUBDIST 2               //Sub-Distributors.
 
 //Signals sent from master to sub distributors. State of the farm.
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "256x256.pgm";         //put your input image path here
-char outfname[] = "256x256(3-2).pgm";  //put your output image path here
+char infname[] = "128x128.pgm";         //put your input image path here
+char outfname[] = "128x128(3-2other).pgm";  //put your output image path here
 
 //for debug
 void printBinary(uint32_t queriedInt, uchar length) {
@@ -138,8 +138,6 @@ int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
                 p <: pattern;
                 break;
         }
-        fromDist :> pattern;        // Receive new pattern from distributor.
-        p <: pattern;               // Send pattern to LED port.
     }
     return 0;
 }
@@ -250,7 +248,7 @@ uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend c_toLEDs)
+void DataInStream(char infname[], streaming chanend c_out, chanend c_fromButtons, chanend c_toLEDs)
 {
   int res;
   uchar line[30];
@@ -322,7 +320,7 @@ void DataInStream(char infname[], chanend c_out, chanend c_fromButtons, chanend 
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, chanend c_in, chanend c_out, chanend c_subDist[n], unsigned n) {
+void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, streaming chanend c_in, chanend c_out, streaming chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
     double start = 0;           // Start time for processing.
     double current = 0;         //time after processing a round.
@@ -377,13 +375,18 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                     current += 42.94967295;
                 }
                 totalTime += current - start;
-                c_toLEDs <: OFF;
+                if (turn % 2 == 0) {
+                    c_toLEDs <: OFF;
+                }
+                else {
+                    c_toLEDs <: GRNS;
+                }
                 //printf( "\nRound %d completed...\n", turn);
 
                 if (turn == RUNUNTIL ) { state = STOP; } //for debug
 
                 //sending the automaton state to distributor.
-                if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; c_toLEDs <: GRNS; }
+                if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0; }
                 else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; c_toLEDs <: RED;  }
                 else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; c_toLEDs <: BLU;  } // Turn ON the blue LED to indicate export of the image has STARTED.
 
@@ -416,7 +419,6 @@ void mainDistributor(chanend c_fromButtons, chanend c_toLEDs, chanend fromAcc, c
                         }
                      }
                     start = getCurrentTime();
-                    c_toLEDs <: GRNS;
                 }
                 else {
                     for (int i = 0; i < IMHT; i ++) {
@@ -478,7 +480,7 @@ uchar findFreeWorker(uchar workers [NUMBEROFWORKERS]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
+void subDistributor(streaming chanend c_in, streaming chanend c_toWorker[n], unsigned n)
 {
   uint32_t linePart[SPLITWIDTH][IMHT]; //stores processing image
   uint32_t copyPart[SPLITWIDTH][IMHT]; //stores results.
@@ -548,16 +550,23 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
       }
       if (nextTurn == 0 && workersWorking < NUMBEROFWORKERS) {
           freeWorker = findFreeWorker(workerState);
-          if (actualWidth > 2) {
-              // priorities edges
-              if (edgesRowsSent <= edgesRowsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
-                  index[freeWorker][0] = (edgesColsSent % 2) * (actualWidth - 1);
-                  index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
-                  edgesColsSent++;
-                  if (edgesColsSent % 2 == 0) { edgesRowsSent++; }
-                  sent = 1;
+          // priorities edges
+          if (edgesRowsSent <= edgesRowsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
+
+              index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
+              edgesColsSent++;
+              if (actualWidth == 1) {
+                  index[freeWorker][0] = 0;
+                  edgesRowsSent++;
               }
-              else if (workerColsSent < distRowsReceived - 2 * (actualWidth - 2) || (distRowsReceived == IMHT && workerRowsSent < IMHT)){
+              else {
+                  index[freeWorker][0] = (edgesColsSent % 2) * (actualWidth - 1);
+                  if (edgesColsSent % 2 == 0) { edgesRowsSent++; }
+              }
+              sent = 1;
+          }
+          if (sent == 0 && actualWidth > 2) {
+              if (workerColsSent < distRowsReceived - 2 * (actualWidth - 2) || (distRowsReceived == IMHT && workerRowsSent < IMHT)){
                   index[freeWorker][0] = (workerColsSent) % (actualWidth - 2) + 1;
                   index[freeWorker][1] = (workerRowsSent + 1) % IMHT;
                   workerColsSent++;
@@ -565,26 +574,6 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                   sent = 1;
               }
               //if no rows sent then process image.
-
-          }
-          else if (actualWidth == 1){                    //the edge case where the distributor only has one column.
-              if (edgesRowsSent <= edgesRowsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
-                  index[freeWorker][0] = 0;
-                  index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
-                  edgesColsSent++;
-                  edgesRowsSent++;
-                  sent = 1;
-
-              }
-          }
-          else if (actualWidth == 2) {
-              if (edgesRowsSent <= edgesRowsReceived - 3 || (edgesRowsReceived == IMHT && edgesRowsSent < IMHT)) {
-                  index[freeWorker][0] = edgesColsSent % 2;
-                  index[freeWorker][1] = (edgesRowsSent + 1) % IMHT;
-                  edgesColsSent++;
-                  if (edgesColsSent % 2 == 0 ) { edgesRowsSent++; }
-                  sent = 1;
-              }
           }
           if (sent == 1) {
               for (int x = 0; x < 3 ; x++) {
@@ -595,7 +584,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
               sent = 0;
           }
       }
-
+      [[ordered]]
       select {
         //case when receiving from the (main distributor).
         case c_in :> val:
@@ -627,12 +616,12 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                     if (edgesRowsReceived == IMHT) { readIn = 0; } //finish readIN
                 }
                 else {
-                    if (edgesRowsReceived == IMHT && distRowsReceived ==IMHT) { readIn = 0;
-                    } //finish readIN
+                    if (edgesRowsReceived == IMHT && distRowsReceived ==IMHT) { readIn = 0; } //finish readIN
                 }
 
             }
             else {
+
                 edgesColsReceived ++;
                 linePart[0][edgesRowsReceived] = val;
                 c_in :> val;
@@ -666,6 +655,7 @@ void subDistributor(chanend c_in, chanend c_toWorker[n], unsigned n)
                 workerColsReceived++;
                 if (workerColsReceived % (actualWidth - 2) == 0) { workerRowsReceived ++; }
             }
+
             break;
 
         default:
@@ -763,7 +753,7 @@ uchar isTwoFiveFive(uchar input) {
 // Worker that processes part of the image.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void worker(chanend c_fromDist) {
+void worker(streaming chanend c_fromDist) {
     uint32_t lines[3];              //input from the distributor.
     uchar results[30];              //records the results.
     uchar count = 0;                //number of neighbours for each cell.
@@ -885,11 +875,12 @@ int main(void) {
 
 i2c_master_if i2c[1];                                               //interface to orientation
 
-chan c_inIO, c_outIO, c_control;                                    //extend your channel definitions here
-chan c_workers[NUMBEROFWORKERS];                                    // Worker channels (one for each worker)  for sub distributor 0.
-chan c_otherWorkers[NUMBEROFWORKERS];                               // Worker channels (one for each workder) for sub distributor 1.
+streaming chan c_inIO;
+chan c_outIO, c_control;                                    //extend your channel definitions here
+streaming chan c_workers[NUMBEROFWORKERS];                                    // Worker channels (one for each worker)  for sub distributor 0.
+streaming chan c_otherWorkers[NUMBEROFWORKERS];                               // Worker channels (one for each workder) for sub distributor 1.
 chan c_buttonsToDist, c_distToLEDs, c_buttonsToData, c_dataToLEDs;  // Button and LED channels.
-chan c_subDist[NUMBEROFSUBDIST];
+streaming chan c_subDist[NUMBEROFSUBDIST];
 
 par {
     on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
