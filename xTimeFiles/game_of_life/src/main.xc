@@ -446,6 +446,15 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                         fromAcc :> val;
                         if (val == 0) {
                             state = CONTINUE;
+<<<<<<< HEAD
+=======
+                            if (turn % 2 == 0) {
+                                leds <: OFF;
+                            }
+                            else {
+                                leds <: GRNS;
+                            }
+>>>>>>> 43bd60b2848734895af44b7ca1fd485671816c63
                         }
                     }
 
