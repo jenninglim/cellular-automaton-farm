@@ -14,19 +14,19 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 256                         //image height
-#define  IMWD 256                         //image width
+#define  IMHT 256                         // Image height
+#define  IMWD 256                         // Image width
 
-//the variables below must change when image size changes
-#define SPLITWIDTH      5                //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH  9                 //ceil(IMWD / 30)
-#define RUNUNTIL       1000                //for debug
+// The variables below must change when image size changes
+#define SPLITWIDTH      5                 // Ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH  9                 // Ceil(IMWD / 30)
+#define RUNUNTIL       1000               // For debug
 
-//Number of ...
-#define NUMBEROFWORKERS 3               //Workers
-#define NUMBEROFSUBDIST 2               //Sub-Distributors.
+// Number of ...
+#define NUMBEROFWORKERS 3                 // Number of workers for each sub distributor.
+#define NUMBEROFSUBDIST 2                 // Sub-Distributors.
 
-//Signals sent from master to sub distributors. State of the farm.
+// Signals sent from master to sub distributors. State of the farm.
 #define CONTINUE 0
 #define PAUSE    1
 #define STOP     2
@@ -64,9 +64,9 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
 
-typedef unsigned char uchar;           //using uchar as shorthand
+typedef unsigned char uchar;                    //using uchar as shorthand
 
-char infname[] = "256x256.pgm";         //put your input image path here
+char infname[] = "256x256.pgm";                //put your input image path here
 char outfname[] = "256x256(1000-2other).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -272,14 +272,18 @@ void DataInStream(char infname[],  chanend c_out, chanend c_fromButtons)
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chanend c_out,  chanend c_subDist[n], unsigned n) {
-    //various variables to control the state of the same.
+    //Variables for timings.
     double start = 0;           // Start time for processing.
     double current = 0;         // Time after processing a single round.
     double totalTime = 0;       // Total time spent processing.
+    
+    // Variables to for "state".
     uchar state = 0;            // State of the farm.
     int round = 1;              // The number of round ran.
     int previousRound = 0;      // Previous round number.
     int aliveCells = 0;         // Number of live cells at turn
+    
+    //Variables for processing image.
     uchar length = 0;           // Length of actual image.
     uint32_t val;               // Input value.
     uint32_t edges[4];          // Store edges from sub distributor
@@ -320,15 +324,18 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
     while (state != STOP) {
         [[ordered]]
         select {
+            // Receive button press.
             case c_fromButtons :> buttonPressed:
-                if (buttonPressed == SW2) { state = STOP; }     // Enter STOP state.
+                if (buttonPressed == SW2) { state = STOP; }             // Enter STOP state.
                 break;
-
+            
+            // Receive orientation.
             case fromAcc :> val:
                 if (val == 1 && state == CONTINUE) { state = PAUSE; }   // Enter PAUSE state
                 if (val == 0 && state == PAUSE) { state = CONTINUE; }   // Enter CONTINUE state
                 break;
-
+            
+            // Data from subdistributor for processing rounds.
             case c_subDist[int i] :> val:                               // Signal that one distributor is ready.
                 for (int i = 0; i < 4; i++) { edges[i] = 0; }           // Reseting variables.
                 c_subDist[(i + 1) % 2] :> val;                          // Waiting for other subDist to be ready.
@@ -340,6 +347,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                 else {
                     leds <: GRNS;
                 }
+            
                 if (round == RUNUNTIL ) { state = STOP; } // For testing.
 
                 // Add time
@@ -399,7 +407,8 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                         }
                      }
                 }
-                else {
+                // If state is STOP or CONTINUE.
+                else { 
                     for (int i = 0; i < IMHT; i ++) {
                         for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
                             length = 30;
@@ -409,28 +418,30 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                             if (j < SPLITWIDTH) { c_subDist[0] :> val; }
                             else { c_subDist[1] :> val; }
 
-                            //calculate live cells.
+                            // Calculate the amount of live cells at current turn.
                             aliveCells = aliveCells + numberOfAliveCells(val, length);
 
                             if (state == STOP) {
-                                //splitting uint32_t into its constituent bits
-                                //sent to be written out.
+                                // Splitting uint32_t into its constituent bits
+                                // To be written out.
                                 for (int l = 1 ; l < length + 1 ; l ++) {
                                     c_out <: getBit(val, l);
                                 }
                             }
                         }
                     }
-                    //print status report.
+                    // Print status report.
                     printStatusReport(totalTime, round, aliveCells, state - 1);
-                    aliveCells = 0;
-
+                    aliveCells = 0;      // Reset number of cells.
+                    
+                    // Wait for state to change from pause.
                     while (state == PAUSE) {
                         fromAcc :> val;
                         if (val == 0) {
                             state = CONTINUE;
                         }
                     }
+                    // If STOP, then turn off LEDS.
                     if (state == STOP) { leds <: OFF; }  // Turn OFF the green LED to indicate reading of the image has FINISHED.
                 }
                 break;
@@ -462,34 +473,35 @@ uchar findFreeWorker(uchar workers [NUMBEROFWORKERS]) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
 {
-  uint32_t linePart[SPLITWIDTH][IMHT]; //stores processing image
-  uint32_t copyPart[SPLITWIDTH][IMHT]; //stores results.
-  uchar readIn = 1;                    //boolean for reading in files.
+  uint32_t linePart[SPLITWIDTH][IMHT]; // Stores processing image.
+  uint32_t copyPart[SPLITWIDTH][IMHT]; // Stores results.
+  uchar readIn = 1;                    // Boolean, if reading in from main distributor.
+  uchar sent = 0;                      // Boolean, if something is sent to workers.
 
-  int edgesColsSent = 0;               //sent from worker
-  int edgesRowsSent = 0;               //
 
-  int edgesRowsReceived = 0;           //recieved from main distributor
-  int edgesColsReceived = 0;           //recieved from main distributor
+  int edgesColsSent = 0;               // Edges sent from worker
+  int edgesRowsSent = 0;               // Edges sent 
 
-  int workerEdgeColsReceived = 0;      //received from worker
-  int workerEdgeRowsReceived = 0;      //
+  int edgesRowsReceived = 0;           // Recieved from main distributor
+  int edgesColsReceived = 0;           // Recieved from main distributor
 
-  int distColsReceived = 0;            //number of columns received from the distributor.
-  int distRowsReceived = 0;            //numbers of rows received from the distributor
+  int workerEdgeColsReceived = 0;      // Received from worker
+  int workerEdgeRowsReceived = 0;      // 
 
-  int workerColsReceived = 0;          //number of columns received from workers
+  int distColsReceived = 0;            // number of columns received from the distributor.
+  int distRowsReceived = 0;            // numbers of rows received from the distributor
+
+  int workerColsReceived = 0;          // number of columns received from workers
   int workerRowsReceived = 0;          //number of rows received from workers
 
-  int workerColsSent = 0;              //number of columns sent to the worker. l
-  int workerRowsSent = 0;              //number of rows sent to the worker. k
+  int workerColsSent = 0;              // number of columns sent to the worker.
+  int workerRowsSent = 0;              // number of rows sent to the worker.
 
   int actualWidth = 0;                 // actual width of the array used.
   int val = 0;                         // input value from c_in or c_toWorkers.
 
-  uchar workerState[NUMBEROFWORKERS];  //Store the state of the worker.
-  uchar freeWorker = -1;
-  uchar sent = 0;
+  uchar workerState[NUMBEROFWORKERS];  // Store the state of the worker.
+  uchar freeWorker = -1;               // Number of free workers.
 
   /*
    * index[j][i] for the workers
@@ -498,12 +510,12 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
    */
   int index[NUMBEROFWORKERS][2];
 
-  uchar state = 0;                     // boolean for pause state
-  uchar nextTurn = 0;                  //boolean for next Turn
+  uchar state = 0;                     // Boolean, for state.
+  uchar nextTurn = 0;                  // Boolean, for next state.
 
-  uchar workersWorking = 0;            //number of workers starting to work
+  uchar workersWorking = 0;            // Number of workers starting to work
 
-  //Initialise empty arrays
+  // Initialise empty arrays
   for (int i = 0; i < NUMBEROFWORKERS; i ++) {
       for (int j = 0; j < 2; j ++) {
           index[i][j] = 0;
@@ -511,25 +523,22 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
       workerState[i] = 0;
   }
 
-  //Getting actual width from main dsitributor
+  // Getting actual width from main dsitributor
   c_in :> actualWidth;
 
-  //Starting up and wait for tilting of the xCore-200 Explorer
+  // Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage: Start, size = %dx%d\n", IMHT, actualWidth );
-
-  //Read in and do something with your image values..
-  //This just inverts every pixel, but you should
-  //change the image according to the "Game of Life"
   while (state != STOP) {
       if (actualWidth == 1 || actualWidth == 2) {
-          if (edgesRowsReceived == IMHT) { readIn = 0; }                                                // if finish read in
-          if (edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && readIn == 0) { nextTurn = 1; }  // if finished processing current turn
+          if (edgesRowsReceived == IMHT) { readIn = 0; }                                                 // If finished read in from main.
+          if (edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && readIn == 0) { nextTurn = 1; }  // if finished processing current turn.
       }
       else {
           if (edgesRowsReceived == IMHT && distRowsReceived ==IMHT) { readIn = 0; }                     // if finish read in
           if (workerRowsSent == IMHT && edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && workerRowsReceived == IMHT  && readIn == 0) { nextTurn = 1; } // finished processing current turn
       }
-      //Distribute work to workers.
+      
+      // Distribute work to workers.
       if (nextTurn == 0 && workersWorking < NUMBEROFWORKERS) {
           freeWorker = findFreeWorker(workerState);
           //Work on edges if possible.
@@ -546,7 +555,7 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
               }
               sent = 1;
           }
-          //else work on the rest of the image.
+          // Else work on the rest of the image.
           if (sent == 0 && actualWidth > 2) {
               if (workerColsSent < distRowsReceived - 2 * (actualWidth - 2) || (distRowsReceived == IMHT && workerRowsSent < IMHT)) {
                   index[freeWorker][0] = (workerColsSent) % (actualWidth - 2) + 1;
@@ -556,7 +565,7 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
                   sent = 1;
               }
           }
-          //send image to worker (if available).
+          // Send image to worker (if available).
           if (sent == 1) {
               for (int x = 0; x < 3 ; x++) {
                   c_toWorker[freeWorker] <: linePart[index[freeWorker][0]][(index[freeWorker][1] - 1 + x + IMHT) % IMHT];
