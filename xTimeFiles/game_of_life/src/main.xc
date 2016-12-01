@@ -313,7 +313,8 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
     double current = 0;         //time after processing a round.
     double totalTime = 0;
     uchar state = 0;        //Signal to the sub distributors the state of the farm.
-    int turn = 1;           //turn number
+    int round = 1;           //turn number
+    int previousRound = 1;
     int aliveCells = 0;     //number of live cells at turn
     uchar length = 0;
     uint32_t val;           //read in value.
@@ -367,36 +368,40 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                 break;
 
             case c_subDist[int i] :> val:
-                //reseting variables.
-                for (int i = 0; i < 4; i++) { edges[i] = 0; }
-                c_subDist[(i + 1) % 2] :> val; //wait for other subDist
-                if (turn % 2 == 0) {
+                c_subDist[i] <: state;
+
+                for (int i = 0; i < 4; i++) { edges[i] = 0; }           // Reseting variables.
+                c_subDist[(i + 1) % 2] :> val;                          // Waiting for other subDist to be ready.
+
+                // Switching LEDS off or on. (Depending on the round).
+                if (round % 2 == 0) {
                     leds <: OFF;
                 }
                 else {
                     leds <: GRNS;
                 }
-                current = getCurrentTime();
-                if (current < start) {
-                    current += 42.94967295;
+                if (round == RUNUNTIL ) { state = STOP; } //for debug
+
+                // Add time when appropriate.
+                if (previousRound != round) {
+                    current = getCurrentTime();
+                    if (current < start) {
+                        current += 42.94967295;
+                    }
+                    totalTime += current - start;
+                    previousRound = round;
                 }
-                totalTime += current - start;
-                //printf( "\nRound %d completed...\n", turn);
+                start = getCurrentTime();
 
-                if (turn == RUNUNTIL ) { state = STOP; } //for debug
-                //sending the automaton state to distributor.
-                if (state == CONTINUE || state ==  STOP) {
-                    if (state == CONTINUE) {
-                        start = getCurrentTime();
-                        c_subDist[0] <: CONTINUE;
-                        c_subDist[1] <: CONTINUE;
-                    }
-                    else {
-                        c_subDist[0] <: STOP;
-                        c_subDist[1] <: STOP;
-                        leds <: BLU;
-                    }
-
+                // Sending the state to the sub distributor.
+                if (state == CONTINUE) {
+                    c_subDist[0] <: CONTINUE;
+                    c_subDist[1] <: CONTINUE;
+                }
+                else if (state == STOP) {
+                    c_subDist[0] <: STOP;
+                    c_subDist[1] <: STOP;
+                    leds <: BLU;
                 }
                 else if (state == PAUSE) {
                     c_subDist[0] <: 1;
@@ -404,29 +409,29 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                     leds <: RED;
                 }
 
-                //if CONTINUE, receive images edges from sub distributor to be assigned edges.
+                // If CONTINUE, receive images edges from sub distributor to be assigned edges.
                 if (state == CONTINUE) {
-                    turn++ ; //increment turn.
+                    round++ ;                     //increment Round Number.
                     for (int i = 0; i < IMHT; i ++ ){
-                        //receiving edges.
+                        // Receiving edges.
                         c_subDist[0] :> edges[0];
                         c_subDist[0] :> edges[1];
                         c_subDist[1] :> edges[2];
                         c_subDist[1] :> edges[3];
 
-                        //assigning edges
+                        // Assigning edges
                         edges[3] = assignRightEdge(edges[3],IMHT % 30, edges[0]);
                         edges[0] = assignLeftEdge(edges[3], IMHT % 30,  edges[0]);
                         edges[1] = assignRightEdge(edges[1], 30, edges[2]);
                         edges[2] = assignLeftEdge(edges[1], 30, edges[2]);
 
-                        //this is an outlier case.
+                        // This is an outlier case.
                         if (UINTARRAYWIDTH - SPLITWIDTH == 1) {
                             edges[3] = assignLeftEdge(edges[1], 30, edges[3]);
                             edges[2] = assignRightEdge(edges[2],IMHT % 30, edges[0]);
                         }
 
-                        //sends back to the edges.
+                        // Sends back the edges to the sub Distributor.
                         for (int j = 0; j < 2; j ++) {
                             c_subDist[0] <: edges[j];
                             c_subDist[1] <: edges[j+2];
@@ -439,7 +444,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                             length = 30;
                             if (j == UINTARRAYWIDTH - 1) { length = IMWD % 30; }
 
-                            //receiving image from distributors to be written out.
+                            // Receiving image from sub distributor.
                             if (j < SPLITWIDTH) { c_subDist[0] :> val; }
                             else { c_subDist[1] :> val; }
 
@@ -456,7 +461,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                         }
                     }
                     //print status report.
-                    printStatusReport(totalTime, turn, aliveCells, state - 1);
+                    printStatusReport(totalTime, round, aliveCells, state - 1);
 
                     while (state == PAUSE) {
                         fromAcc :> val;
