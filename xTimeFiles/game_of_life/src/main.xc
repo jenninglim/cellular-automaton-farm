@@ -14,12 +14,12 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 128                         //image height
-#define  IMWD 128                         //image width
+#define  IMHT 64                         //image height
+#define  IMWD 64                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH      3                //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH  5                 //ceil(IMWD / 30)
+#define SPLITWIDTH      2                //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH  3                 //ceil(IMWD / 30)
 #define RUNUNTIL       1000                //for debug
 
 //Number of ...
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "128x128.pgm";         //put your input image path here
-char outfname[] = "128x128  (3-2other).pgm";  //put your output image path here
+char infname[] = "64x64.pgm";         //put your input image path here
+char outfname[] = "64x64(3-2other).pgm";  //put your output image path here
 
 //for debug
 void printBinary(uint32_t queriedInt, uchar length) {
@@ -353,6 +353,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
     start = getCurrentTime();
 
     while (1) {
+        [[ordered]]
         select {
             case c_fromButtons :> buttonPressed:
                 if (buttonPressed == SW2) {      //Export state.
@@ -361,32 +362,47 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                 break;
 
             case fromAcc :> val:
-                if (val == 1 && state == CONTINUE) { state = PAUSE; leds <: RED;  }
+                if (val == 1 && state == CONTINUE) { state = PAUSE; }
+                if (val == 0 && state == PAUSE) { state = CONTINUE; }
                 break;
 
             case c_subDist[int i] :> val:
                 //reseting variables.
                 for (int i = 0; i < 4; i++) { edges[i] = 0; }
                 c_subDist[(i + 1) % 2] :> val; //wait for other subDist
-                current = getCurrentTime();
-                if (current < start) {
-                    current += 42.94967295;
-                }
-                totalTime += current - start;
                 if (turn % 2 == 0) {
                     leds <: OFF;
                 }
                 else {
                     leds <: GRNS;
                 }
+                current = getCurrentTime();
+                if (current < start) {
+                    current += 42.94967295;
+                }
+                totalTime += current - start;
                 //printf( "\nRound %d completed...\n", turn);
 
                 if (turn == RUNUNTIL ) { state = STOP; } //for debug
-
                 //sending the automaton state to distributor.
-                if (state == CONTINUE)   { c_subDist[1] <: 0; c_subDist[0] <: 0;  }
-                else if (state == PAUSE) { c_subDist[0] <: 1; c_subDist[1] <: 1; leds <: RED; }
-                else if (state == STOP)  { c_subDist[0] <: 2; c_subDist[1] <: 2; leds <: BLU; } // Turn ON the blue LED to indicate export of the image has STARTED.
+                if (state == CONTINUE || state ==  STOP) {
+                    if (state == CONTINUE) {
+                        start = getCurrentTime();
+                        c_subDist[0] <: CONTINUE;
+                        c_subDist[1] <: CONTINUE;
+                    }
+                    else {
+                        c_subDist[0] <: STOP;
+                        c_subDist[1] <: STOP;
+                        leds <: BLU;
+                    }
+
+                }
+                else if (state == PAUSE) {
+                    c_subDist[0] <: 1;
+                    c_subDist[1] <: 1;
+                    leds <: RED;
+                }
 
                 //if CONTINUE, receive images edges from sub distributor to be assigned edges.
                 if (state == CONTINUE) {
@@ -416,7 +432,6 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                             c_subDist[1] <: edges[j+2];
                         }
                      }
-                    start = getCurrentTime();
                 }
                 else {
                     for (int i = 0; i < IMHT; i ++) {
@@ -442,23 +457,13 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                     }
                     //print status report.
                     printStatusReport(totalTime, turn, aliveCells, state - 1);
+
                     while (state == PAUSE) {
                         fromAcc :> val;
                         if (val == 0) {
                             state = CONTINUE;
-                            if (turn % 2 == 0) {
-                                leds <: OFF;
-                            }
-                            else {
-                                leds <: GRNS;
-                            }
-                            c_subDist[0] :> val;
-                            c_subDist[1] :> val;
-                            c_subDist[0] <: CONTINUE;
-                            c_subDist[1] <: CONTINUE;
                         }
                     }
-
                     if (state == STOP) { leds <: OFF; }  // Turn OFF the green LED to indicate reading of the image has FINISHED.
                 }
                 break;
@@ -555,7 +560,7 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
       }
       else {
           if (edgesRowsReceived == IMHT && distRowsReceived ==IMHT) { readIn = 0; }                     // if finish read in
-          if (workerRowsSent == IMHT && edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && workerRowsReceived == IMHT  && readIn == 0) { nextTurn = 1; printf("done%d\n", actualWidth); } // finished processing current turn
+          if (workerRowsSent == IMHT && edgesRowsSent == IMHT && workerEdgeRowsReceived == IMHT && workerRowsReceived == IMHT  && readIn == 0) { nextTurn = 1; } // finished processing current turn
       }
       //Distribute work to workers.
       if (nextTurn == 0 && workersWorking < NUMBEROFWORKERS) {
@@ -577,9 +582,9 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
           //else work on the rest of the image.
           if (sent == 0 && actualWidth > 2) {
               if (workerColsSent < distRowsReceived - 2 * (actualWidth - 2) || (distRowsReceived == IMHT && workerRowsSent < IMHT)) {
-                  workerColsSent++;
-                  index[freeWorker][0] = (workerColsSent) % (actualWidth - 2);
+                  index[freeWorker][0] = (workerColsSent) % (actualWidth - 2) + 1;
                   index[freeWorker][1] = (workerRowsSent + 1) % IMHT;
+                  workerColsSent++;
                   if (workerColsSent % (actualWidth - 2) == 0) { workerRowsSent++; }
                   sent = 1;
               }
@@ -625,11 +630,11 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
             }
             // Receiving edges only.
             else {
-                edgesColsReceived ++;
                 linePart[0][edgesRowsReceived] = val;
                 c_in :> val;
                 linePart[actualWidth - 1][edgesRowsReceived] = val;
-                edgesRowsReceived = edgesRowsReceived + 2;
+                edgesColsReceived = edgesColsReceived + 2;
+                edgesRowsReceived ++;
                 if (edgesRowsReceived < IMHT) {                    // Sent more edges to main.
                     c_in <: linePart[0][edgesRowsReceived];
                     c_in <: linePart[(actualWidth - 1)][edgesRowsReceived];
@@ -664,7 +669,6 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
 
         default:
             while (nextTurn) {
-                printf("here\n");
                 c_in <: 1;                              // Letting main distributor know (this) is ready
                 c_in :> val;                            // Receiving "state" from main.
 
@@ -703,10 +707,8 @@ void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
                         }
                     }
                 }
-
                 //Reset variables for next turn.
                 if (state == CONTINUE) {
-
                     edgesColsSent = 0;
                     edgesRowsSent = 0;
 
@@ -857,7 +859,6 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
 
         // Get new x-axis tilt value.
         int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
-
         // If previously horizontal
         if (!vertical) {
             // If now vertical, tell the distributor.
@@ -869,7 +870,7 @@ void orientation( client interface i2c_master_if i2c, chanend toDist) {
         // If previously vertical
         else {
             // If now horizontal, tell the distributor.
-            if (x == 0) {
+            if (x <= 10 && x >= -10) {
                 vertical = 0;
                 toDist <: 0;
             }
