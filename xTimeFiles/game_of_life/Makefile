@@ -17,7 +17,7 @@ APP_NAME = game_of_life
 # If the variable XCC_MAP_FLAGS is set it overrides the flags passed to
 # xcc for the final link (mapping) stage.
 
-XCC_FLAGS = 
+XCC_FLAGS = -O3
 
 # The USED_MODULES variable lists other module used by the application.
 USED_MODULES = lib_i2c lib_logging lib_xassert

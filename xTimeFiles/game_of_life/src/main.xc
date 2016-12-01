@@ -14,16 +14,16 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 256                         // Image height
-#define  IMWD 256                         // Image width
+#define  IMHT 512                         // Image height
+#define  IMWD 512                         // Image width
 
 // The variables below must change when image size changes
-#define SPLITWIDTH      5                 // Ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH  9                 // Ceil(IMWD / 30)
-#define RUNUNTIL       1000               // For debug
+#define SPLITWIDTH      9                // Ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH  18                 // Ceil(IMWD / 30)
+#define RUNUNTIL       1000                // For debug
 
 // Number of ...
-#define NUMBEROFWORKERS 3                 // Number of workers for each sub distributor.
+#define NUMBEROFWORKERS 4                 // Number of workers for each sub distributor.
 #define NUMBEROFSUBDIST 2                 // Sub-Distributors.
 
 // Signals sent from master to sub distributors. State of the farm.
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;                    //using uchar as shorthand
 
-char infname[] = "256x256.pgm";                //put your input image path here
-char outfname[] = "256x256(1000-2other).pgm";  //put your output image path here
+char infname[] = "512x512.pgm";                //put your input image path here
+char outfname[] = "512x512(2-final).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -212,7 +212,7 @@ uint32_t assignRightEdge(uint middle, uchar midLength, uint32_t right) {
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[],  chanend c_out, chanend c_fromButtons)
+void DataInStream(char infname[], chanend c_out,  chanend c_fromButtons)
 {
   int res;
   uchar line[30];
@@ -271,7 +271,7 @@ void DataInStream(char infname[],  chanend c_out, chanend c_fromButtons)
 // cells in last round, and the time elapsed since the original image was read in.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chanend c_out,  chanend c_subDist[n], unsigned n) {
+void mainDistributor(chanend c_fromButtons, chanend fromAcc, chanend c_in, chanend c_out, streaming chanend c_subDist[n], unsigned n) {
     //Variables for timings.
     double start = 0;           // Start time for processing.
     double current = 0;         // Time after processing a single round.
@@ -471,7 +471,7 @@ uchar findFreeWorker(uchar workers [NUMBEROFWORKERS]) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void subDistributor( chanend c_in,  chanend c_toWorker[n], unsigned n)
+void subDistributor(streaming chanend c_in,  streaming chanend c_toWorker[n], unsigned n)
 {
   uint32_t linePart[SPLITWIDTH][IMHT]; // Stores processing image.
   uint32_t copyPart[SPLITWIDTH][IMHT]; // Stores results.
@@ -743,7 +743,7 @@ uchar isTwoFiveFive(uchar input) {
 // Worker that processes part of the image.
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void worker( chanend c_fromDist) {
+void worker(streaming chanend c_fromDist) {
     uint32_t lines[3];              //input from the distributor.
     uchar results[30];              //records the results.
     uchar count = 0;                //number of neighbours for each cell.
@@ -866,10 +866,10 @@ i2c_master_if i2c[1];                                               //interface 
 
  chan c_inIO;
  chan c_outIO, c_control;                                            //extend your channel definitions here
- chan c_workers[NUMBEROFWORKERS];                                    // Worker channels (one for each worker)  for sub distributor 0.
- chan c_otherWorkers[NUMBEROFWORKERS];                               // Worker channels (one for each workder) for sub distributor 1.
+ streaming chan c_workers[NUMBEROFWORKERS];                                    // Worker channels (one for each worker)  for sub distributor 0.
+ streaming chan c_otherWorkers[NUMBEROFWORKERS];                               // Worker channels (one for each workder) for sub distributor 1.
  chan c_buttonsToDist, c_buttonsToData;                              // Button and LED channels.
- chan c_subDist[NUMBEROFSUBDIST];                                    // Channels for communicating between main distributor its slaves.
+ streaming chan c_subDist[NUMBEROFSUBDIST];                                    // Channels for communicating between main distributor its slaves.
 
 par {
     on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);                                  //server thread providing orientation data
@@ -877,11 +877,11 @@ par {
     on tile[1]: DataInStream(infname, c_inIO, c_buttonsToData);                        //thread to read in a PGM image
     on tile[1]: DataOutStream(outfname, c_outIO);                                      //thread to write out a PGM image
     on tile[0]: mainDistributor(c_buttonsToDist, c_control, c_inIO, c_outIO, c_subDist, NUMBEROFSUBDIST);   //thread to coorinate work to coordinators.
-    on tile[1]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);              //thread to coordinate work on image
-    on tile[0]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);         //thread to coordinate work on image
+    on tile[0]: subDistributor(c_subDist[0], c_workers, NUMBEROFWORKERS);              //thread to coordinate work on image
+    on tile[1]: subDistributor(c_subDist[1], c_otherWorkers, NUMBEROFWORKERS);         //thread to coordinate work on image
     par (int i = 0; i < NUMBEROFWORKERS; i++){                                         //starting workers
-        on tile[1]: worker(c_workers[i]);                                              // thread to do work on an image.
-        on tile[0]: worker(c_otherWorkers[i]);                                         // thread to do work on an image.
+        on tile[0]: worker(c_workers[i]);                                              // thread to do work on an image.
+        on tile[1]: worker(c_otherWorkers[i]);                                         // thread to do work on an image.
     }
 
     on tile[0]: buttonListener(buttons,c_buttonsToData, c_buttonsToDist);              // Thread to listen for button presses.
