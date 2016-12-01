@@ -69,18 +69,6 @@ typedef unsigned char uchar;           //using uchar as shorthand
 char infname[] = "256x256.pgm";         //put your input image path here
 char outfname[] = "256x256(1000-2other).pgm";  //put your output image path here
 
-//for debug
-void printBinary(uint32_t queriedInt, uchar length) {
-    for (int i = 0; i < length; i ++) {
-        if ( (queriedInt & 0x00000001 << (30 - i)) == 0 ) {
-            printf("0 ");
-        }
-        else {
-            printf("1 ");
-        }
-    }
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Provides the value of the current tile's timer in seconds.
@@ -125,12 +113,12 @@ void printStatusReport(double totalTime, int rounds, int liveCells, int final) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
     int r;                                     // Received button signal.
-    uchar sw1Pressed = 0;                      // Has button been pressed before?
+    uchar sw1Pressed = 0;                          // Has button been pressed before?
     while (1) {
-        b when pinseq(15)  :> r;               // Check that no button is pressed.
-        b when pinsneq(15) :> r;               // Check if some buttons are pressed.
-        if (r == SW1 && sw1Pressed == 0) {     // If SW1 pressed, and not pressed before.
-            c_toDist <: r;                   // send button pattern to dataInStream.
+        b when pinseq(15)  :> r;                 // Check that no button is pressed.
+        b when pinsneq(15) :> r;                 // Check if some buttons are pressed.
+        if (r == SW1 && sw1Pressed == 0) {       // If SW1 pressed, and not pressed before.
+            c_toDist <: r;                       // send button pattern to dataInStream.
             sw1Pressed = 1;
         }
         if (r == SW2 && sw1Pressed) {
@@ -286,27 +274,27 @@ void DataInStream(char infname[],  chanend c_out, chanend c_fromButtons)
 void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chanend c_out,  chanend c_subDist[n], unsigned n) {
     //various variables to control the state of the same.
     double start = 0;           // Start time for processing.
-    double current = 0;         //time after processing a round.
-    double totalTime = 0;
-    uchar state = 0;        //Signal to the sub distributors the state of the farm.
-    int round = 1;           //turn number
-    int previousRound = 1;
-    int aliveCells = 0;     //number of live cells at turn
-    uchar length = 0;
-    uint32_t val;           //read in value.
-    uint32_t edges[4];      //store edges.
+    double current = 0;         // Time after processing a single round.
+    double totalTime = 0;       // Total time spent processing.
+    uchar state = 0;            // State of the farm.
+    int round = 1;              // The number of round ran.
+    int previousRound = 0;      // Previous round number.
+    int aliveCells = 0;         // Number of live cells at turn
+    uchar length = 0;           // Length of actual image.
+    uint32_t val;               // Input value.
+    uint32_t edges[4];          // Store edges from sub distributor
 
-    int buttonPressed;  // The button pressed on the xCore-200 Explorer.
+    int buttonPressed;          // The button pressed on the xCore-200 Explorer.
 
-    //sending distributors information about the array size to be used.
+    // Sending sub distributors information about the array size to be used.
     c_subDist[0] <: (uint32_t) SPLITWIDTH;
     c_subDist[1] <: (uint32_t) UINTARRAYWIDTH - SPLITWIDTH;
 
     // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
     printf( "Waiting for SW1 button press...\n" );
-    int initiated = 0;  // Whether processing has been initiated.
+    int initiated = 0;                              // Whether processing has been initiated.
 
-    while (!initiated) { //wait until SW1 button has been pressed.
+    while (!initiated) {                            // Wait until SW1 button has been pressed.
         c_fromButtons :> buttonPressed;
         if (buttonPressed == SW1) {
             initiated = 1;
@@ -314,7 +302,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
         }
     }
 
-    //Distributing image from dataInstream to sub distributors.
+    // Distributing image from dataInstream to sub distributors.
     for( int i = 0; i < IMHT; i++ ) {
         for (int j = 0; j < UINTARRAYWIDTH; j++) {
             c_in :> val;
@@ -326,37 +314,36 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
         }
     }
 
-    //records the current time.
+    // Records the start time.
     start = getCurrentTime();
 
     while (state != STOP) {
         [[ordered]]
         select {
             case c_fromButtons :> buttonPressed:
-                if (buttonPressed == SW2) {      //Export state.
-                    state = STOP;
-                }
+                if (buttonPressed == SW2) { state = STOP; }     // Enter STOP state.
                 break;
 
             case fromAcc :> val:
-                if (val == 1 && state == CONTINUE) { state = PAUSE; }
-                if (val == 0 && state == PAUSE) { state = CONTINUE; }
+                if (val == 1 && state == CONTINUE) { state = PAUSE; }   // Enter PAUSE state
+                if (val == 0 && state == PAUSE) { state = CONTINUE; }   // Enter CONTINUE state
                 break;
 
-            case c_subDist[int i] :> val:
+            case c_subDist[int i] :> val:                               // Signal that one distributor is ready.
                 for (int i = 0; i < 4; i++) { edges[i] = 0; }           // Reseting variables.
                 c_subDist[(i + 1) % 2] :> val;                          // Waiting for other subDist to be ready.
 
-                // Switching LEDS off or on. (Depending on the round).
+                // Switching LEDS off or on (Depending on the round).
                 if (round % 2 == 0) {
                     leds <: OFF;
                 }
                 else {
                     leds <: GRNS;
                 }
-                if (round == RUNUNTIL ) { state = STOP; } //for debug
+                if (round == RUNUNTIL ) { state = STOP; } // For testing.
 
-                // Add time when appropriate.
+                // Add time
+                // This is to account for the overflow of the timing.
                 if (previousRound != round) {
                     current = getCurrentTime();
                     if (current < start) {
@@ -385,15 +372,15 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
 
                 // If CONTINUE, receive images edges from sub distributor to be assigned edges.
                 if (state == CONTINUE) {
-                    round++ ;                     //increment Round Number.
+                    round++ ;                     // Increment Round Number.
                     for (int i = 0; i < IMHT; i ++ ){
-                        // Receiving edges.
+                        // Receiving edges from each sub distributor.
                         c_subDist[0] :> edges[0];
                         c_subDist[0] :> edges[1];
                         c_subDist[1] :> edges[2];
                         c_subDist[1] :> edges[3];
 
-                        // Assigning edges
+                        // Assigning edges values to each edge.
                         edges[3] = assignRightEdge(edges[3],IMHT % 30, edges[0]);
                         edges[0] = assignLeftEdge(edges[3], IMHT % 30,  edges[0]);
                         edges[1] = assignRightEdge(edges[1], 30, edges[2]);
