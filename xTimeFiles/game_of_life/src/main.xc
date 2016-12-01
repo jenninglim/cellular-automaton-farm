@@ -14,16 +14,16 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 64                         //image height
-#define  IMWD 64                         //image width
+#define  IMHT 512                         //image height
+#define  IMWD 512                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH      2                //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH  3                 //ceil(IMWD / 30)
+#define SPLITWIDTH      9                //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH  18                 //ceil(IMWD / 30)
 #define RUNUNTIL       1000                //for debug
 
 //Number of ...
-#define NUMBEROFWORKERS 3               //Workers
+#define NUMBEROFWORKERS 4               //Workers
 #define NUMBEROFSUBDIST 2               //Sub-Distributors.
 
 //Signals sent from master to sub distributors. State of the farm.
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "64x64.pgm";         //put your input image path here
-char outfname[] = "64x64(3-2other).pgm";  //put your output image path here
+char infname[] = "512x512.pgm";         //put your input image path here
+char outfname[] = "512x512(1000-2other).pgm";  //put your output image path here
 
 //for debug
 void printBinary(uint32_t queriedInt, uchar length) {
@@ -118,30 +118,6 @@ void printStatusReport(double totalTime, int rounds, int liveCells, int final) {
            rounds, liveCells, IMHT*IMWD, totalTime, totalTime / rounds, NUMBEROFWORKERS);
 }
 
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// DISPLAYS an LED pattern
-//
-/////////////////////////////////////////////////////////////////////////////////////////
-int showLEDs(out port p, chanend fromDist, chanend fromDataIn) {
-    int pattern;                     // 1st bit (1) ...separate green LED
-                                     // 2nd bit (2) ...blue LED
-                                     // 3rd bit (4) ...green LED
-                                     // 4th bit (8) ...red LED
-    while (1) {
-        select {
-            case fromDist :> pattern:
-                p <: pattern;
-                break;
-            case fromDataIn :> pattern:
-                p <: pattern;
-                break;
-        }
-    }
-    return 0;
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // READ BUTTONS and send button pattern to distributor.
@@ -158,7 +134,7 @@ void buttonListener(in port b, chanend c_toDataIn, chanend c_toDist) {
             sw1Pressed = 1;
         }
         if (r == SW2 && sw1Pressed) {
-            c_toDist   <: r;                    //// send button pattern to distributor.
+            c_toDist <: r;                    //// send button pattern to distributor.
         }
     }
 }
@@ -353,7 +329,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
     //records the current time.
     start = getCurrentTime();
 
-    while (1) {
+    while (state != STOP) {
         [[ordered]]
         select {
             case c_fromButtons :> buttonPressed:
@@ -368,8 +344,6 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                 break;
 
             case c_subDist[int i] :> val:
-                c_subDist[i] <: state;
-
                 for (int i = 0; i < 4; i++) { edges[i] = 0; }           // Reseting variables.
                 c_subDist[(i + 1) % 2] :> val;                          // Waiting for other subDist to be ready.
 
@@ -462,6 +436,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc,  chanend c_in, chan
                     }
                     //print status report.
                     printStatusReport(totalTime, round, aliveCells, state - 1);
+                    aliveCells = 0;
 
                     while (state == PAUSE) {
                         fromAcc :> val;
