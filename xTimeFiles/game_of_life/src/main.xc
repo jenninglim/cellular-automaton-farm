@@ -14,16 +14,16 @@
  * SPLITWIDTH       1    1    2      3    5    9       20      35     22    18
  * UINTARRAYWIDTH   1    2    3      5    9    18      40      69     43    35
  */
-#define  IMHT 512                         //image height
-#define  IMWD 512                         //image width
+#define  IMHT 256                         //image height
+#define  IMWD 256                         //image width
 
 //the variables below must change when image size changes
-#define SPLITWIDTH      9                //ceil(UINTARRAYWIDTH /2)
-#define UINTARRAYWIDTH  18                 //ceil(IMWD / 30)
+#define SPLITWIDTH      5                //ceil(UINTARRAYWIDTH /2)
+#define UINTARRAYWIDTH  9                 //ceil(IMWD / 30)
 #define RUNUNTIL       1000                //for debug
 
 //Number of ...
-#define NUMBEROFWORKERS 4               //Workers
+#define NUMBEROFWORKERS 3               //Workers
 #define NUMBEROFSUBDIST 2               //Sub-Distributors.
 
 //Signals sent from master to sub distributors. State of the farm.
@@ -66,8 +66,8 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 
 typedef unsigned char uchar;           //using uchar as shorthand
 
-char infname[] = "512x512.pgm";         //put your input image path here
-char outfname[] = "512x512(1000-2other).pgm";  //put your output image path here
+char infname[] = "256x256.pgm";         //put your input image path here
+char outfname[] = "256x256(1000-2other).pgm";  //put your output image path here
 
 //for debug
 void printBinary(uint32_t queriedInt, uchar length) {
