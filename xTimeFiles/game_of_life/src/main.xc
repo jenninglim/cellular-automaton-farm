@@ -20,7 +20,7 @@
 // The variables below must change when image size changes
 #define SPLITWIDTH      9                // Ceil(UINTARRAYWIDTH /2)
 #define UINTARRAYWIDTH  18                 // Ceil(IMWD / 30)
-#define RUNUNTIL       1000                // For debug
+#define RUNUNTIL        2                // For debug
 
 // Number of ...
 #define NUMBEROFWORKERS 4                 // Number of workers for each sub distributor.
@@ -67,7 +67,7 @@ on tile[0]: in port buttons = XS1_PORT_4E;
 typedef unsigned char uchar;                    //using uchar as shorthand
 
 char infname[] = "512x512.pgm";                //put your input image path here
-char outfname[] = "512x512(2-final).pgm";  //put your output image path here
+char outfname[] = "512x512(10-final).pgm";  //put your output image path here
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -103,7 +103,7 @@ void printStatusReport(double totalTime, int rounds, int liveCells, int final) {
            "Average Time/Round: %.4lf seconds\n"
            "Number of workers: %d\n"
            "----------------------------------\n\n",
-           rounds, liveCells, IMHT*IMWD, totalTime, totalTime / rounds, NUMBEROFWORKERS);
+           rounds, liveCells, IMHT*IMWD, totalTime, totalTime / rounds, NUMBEROFWORKERS * 2);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -294,6 +294,8 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc, chanend c_in, chane
     c_subDist[0] <: (uint32_t) SPLITWIDTH;
     c_subDist[1] <: (uint32_t) UINTARRAYWIDTH - SPLITWIDTH;
 
+    printf( "ProcessImage: Start, size = %dx%d\n", IMHT, IMWD );
+
     // Start up and wait for SW1 button press on the xCORE-200 eXplorer.
     printf( "Waiting for SW1 button press...\n" );
     int initiated = 0;                              // Whether processing has been initiated.
@@ -408,7 +410,7 @@ void mainDistributor(chanend c_fromButtons, chanend fromAcc, chanend c_in, chane
                      }
                 }
                 // If state is STOP or CONTINUE.
-                else { 
+                else {
                     for (int i = 0; i < IMHT; i ++) {
                         for (int j = 0 ; j < UINTARRAYWIDTH; j ++) {
                             length = 30;
@@ -527,7 +529,6 @@ void subDistributor(streaming chanend c_in,  streaming chanend c_toWorker[n], un
   c_in :> actualWidth;
 
   // Starting up and wait for tilting of the xCore-200 Explorer
-  printf( "ProcessImage: Start, size = %dx%d\n", IMHT, actualWidth );
   while (state != STOP) {
       if (actualWidth == 1 || actualWidth == 2) {
           if (edgesRowsReceived == IMHT) { readIn = 0; }                                                 // If finished read in from main.
